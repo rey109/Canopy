@@ -263,6 +263,12 @@ export const api = {
       body: JSON.stringify({ content, is_anonymous }),
     }),
 
+  updateAspirationStatus: (id: number, status: string) =>
+    request<{ message: string }>(`/public/aspiration/${id}/status`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    }),
+
   // Handover
   listHandovers: () =>
     request<{
