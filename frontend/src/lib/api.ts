@@ -209,6 +209,22 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  getAttendance: (meeting_id: number) =>
+    request<{
+      attendance: {
+        id: number;
+        meeting_id: number;
+        user_nis: string;
+        status: string;
+      }[];
+    }>(`/meeting/${meeting_id}/attendance`),
+
+  recordAttendance: (meeting_id: number, data: { entries: { user_nis: string; status: string }[] }) =>
+    request<{ message: string }>(`/meeting/${meeting_id}/attendance`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   // Assets
   listAssets: () =>
     request<{
@@ -284,6 +300,23 @@ export const api = {
         created_at: string;
       }[];
     }>("/handovers"),
+
+  createHandover: (data: {
+    period: string;
+    final_balance: number;
+    unfinished_proker: any[];
+    vendor_contacts: any[];
+  }) =>
+    request<unknown>("/handover", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  signHandover: (id: number, data: { signature_role: string; signature: string }) =>
+    request<{ message: string }>(`/handover/${id}/sign`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   // Special Division Modules
   getB1Events: () => request<{ events: any[] }>("/special/b1"),

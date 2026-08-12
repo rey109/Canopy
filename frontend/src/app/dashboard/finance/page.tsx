@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 
 interface Transaction {
   id: number;
@@ -15,11 +16,23 @@ interface Transaction {
 }
 
 export default function FinancePage() {
+  const { user } = useAuth();
   const [txns, setTxns] = useState<Transaction[]>([]);
   const [balance, setBalance] = useState({ total_debit: 0, total_credit: 0, balance: 0 });
   const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
+  // Form State
+  const [date, setDate] = useState("");
+  const [type, setType] = useState("debit");
+  const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
+  const [prokerId, setProkerId] = useState("");
+  const [proofUrl, setProofUrl] = useState("");
+
+  const fetchTransactions = () => {
+    setLoading(true);
     api
       .listTransactions()
       .then((res) => {
@@ -32,7 +45,39 @@ export default function FinancePage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchTransactions();
   }, []);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      await api.createTransaction({
+        date: new Date(date).toISOString(),
+        type,
+        amount: Number(amount),
+        description,
+        proker_id: prokerId ? Number(prokerId) : undefined,
+        proof_url: proofUrl || undefined,
+      });
+      setShowModal(false);
+      // Reset form
+      setDate("");
+      setType("debit");
+      setAmount("");
+      setDescription("");
+      setProkerId("");
+      setProofUrl("");
+      fetchTransactions();
+    } catch (err: any) {
+      alert("Gagal mencatat transaksi: " + err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat("id-ID", {
@@ -41,6 +86,8 @@ export default function FinancePage() {
       maximumFractionDigits: 0,
     }).format(val);
   };
+
+  const isBendahara = user?.role === "Bendahara" || user?.role === "Trimitra" || user?.role === "Pembina";
 
   return (
     <div className="animate-fade-in">
@@ -51,28 +98,42 @@ export default function FinancePage() {
             Buku besar keuangan dan riwayat transaksi real-time
           </p>
         </div>
-        <button className="btn-primary">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Catat Transaksi
-        </button>
+        {isBendahara && (
+          <button onClick={() => setShowModal(true)} className="btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Catat Transaksi
+          </button>
+        )}
       </div>
 
       {/* Balance Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 stagger-children">
         <div className="glass-card p-5">
-          <p className="text-xs text-[var(--text-muted)] font-semibold">TOTAL PENGELUARAN (DEBIT)</p>
-          <p className="text-xl font-bold text-red-400 mt-1">{formatCurrency(balance.total_debit)}</p>
+          <p className="text-xs text-[var(--text-muted)] font-semibold uppercase">TOTAL PENGELUARAN (DEBIT)</p>
+          {loading ? (
+            <div className="h-6 w-24 bg-[var(--border)] rounded animate-pulse mt-1" />
+          ) : (
+            <p className="text-xl font-bold text-red-400 mt-1">{formatCurrency(balance.total_debit)}</p>
+          )}
         </div>
         <div className="glass-card p-5">
-          <p className="text-xs text-[var(--text-muted)] font-semibold">TOTAL PENERIMAAN (KREDIT)</p>
-          <p className="text-xl font-bold text-emerald-400 mt-1">{formatCurrency(balance.total_credit)}</p>
+          <p className="text-xs text-[var(--text-muted)] font-semibold uppercase">TOTAL PENERIMAAN (KREDIT)</p>
+          {loading ? (
+            <div className="h-6 w-24 bg-[var(--border)] rounded animate-pulse mt-1" />
+          ) : (
+            <p className="text-xl font-bold text-emerald-400 mt-1">{formatCurrency(balance.total_credit)}</p>
+          )}
         </div>
         <div className="glass-card p-5">
-          <p className="text-xs text-[var(--text-muted)] font-semibold">SALDO SAAT INI</p>
-          <p className="text-xl font-bold text-blue-400 mt-1">{formatCurrency(balance.balance)}</p>
+          <p className="text-xs text-[var(--text-muted)] font-semibold uppercase">SALDO SAAT INI</p>
+          {loading ? (
+            <div className="h-6 w-24 bg-[var(--border)] rounded animate-pulse mt-1" />
+          ) : (
+            <p className="text-xl font-bold text-blue-400 mt-1">{formatCurrency(balance.balance)}</p>
+          )}
         </div>
       </div>
 
@@ -140,6 +201,97 @@ export default function FinancePage() {
           </div>
         )}
       </div>
+
+      {/* Transaction Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="glass-card p-6 w-full max-w-md space-y-4">
+            <h3 className="text-lg font-semibold">💰 Catat Transaksi Baru</h3>
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Tanggal</label>
+                  <input
+                    type="date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    className="input-field"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Tipe</label>
+                  <select
+                    value={type}
+                    onChange={(e) => setType(e.target.value)}
+                    className="input-field bg-[var(--bg-primary)]"
+                    required
+                  >
+                    <option value="debit">Debit (Pengeluaran)</option>
+                    <option value="credit">Kredit (Pemasukan)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Jumlah (Rp)</label>
+                  <input
+                    type="number"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="500000"
+                    className="input-field"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">ID Proker (Opsional)</label>
+                  <input
+                    type="number"
+                    value={prokerId}
+                    onChange={(e) => setProkerId(e.target.value)}
+                    placeholder="Contoh: 1"
+                    className="input-field"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Deskripsi Transaksi</label>
+                <input
+                  type="text"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Pembelian konsumsi rapat koordinasi"
+                  className="input-field"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Link Bukti Transaksi (Opsional)</label>
+                <input
+                  type="url"
+                  value={proofUrl}
+                  onChange={(e) => setProofUrl(e.target.value)}
+                  placeholder="https://drive.google.com/..."
+                  className="input-field"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowModal(false)} className="btn-secondary text-xs">
+                  Batal
+                </button>
+                <button type="submit" disabled={submitting} className="btn-primary text-xs">
+                  {submitting ? "Menyimpan..." : "Simpan Transaksi"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 
 interface Handover {
   id: number;
   period: string;
   final_balance: number;
+  unfinished_proker: any;
+  vendor_contacts: any;
   signature_old_ketua: string;
   signature_new_ketua: string;
   signature_pembina: string;
@@ -14,16 +17,106 @@ interface Handover {
 }
 
 export default function HandoverPage() {
+  const { user } = useAuth();
   const [handovers, setHandovers] = useState<Handover[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showWizard, setShowWizard] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
+  // Sign State
+  const [signingItem, setSigningItem] = useState<Handover | null>(null);
+  const [sigRole, setSigRole] = useState("old_ketua");
+  const [signature, setSignature] = useState("");
+  const [submittingSign, setSubmittingSign] = useState(false);
+
+  // Form State
+  const [period, setPeriod] = useState("");
+  const [finalBalance, setFinalBalance] = useState("");
+  const [unfinishedText, setUnfinishedText] = useState("");
+  const [vendorsText, setVendorsText] = useState("");
+
+  const fetchHandovers = () => {
+    setLoading(true);
     api
       .listHandovers()
       .then((res) => setHandovers(res.handovers || []))
       .catch(() => {})
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchHandovers();
+    // Pre-populate actual current balance
+    api.getBalance().then((b) => setFinalBalance(String(b.balance))).catch(() => {});
   }, []);
+
+  const handleCreateHandover = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+
+    const unfinishedArray = unfinishedText
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => ({ task: line.trim() }));
+
+    const vendorsArray = vendorsText
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => {
+        const parts = line.split(":");
+        return {
+          name: parts[0]?.trim() || "",
+          contact: parts[1]?.trim() || "",
+        };
+      });
+
+    try {
+      await api.createTransaction({
+        date: new Date().toISOString(),
+        type: "debit",
+        amount: Number(finalBalance),
+        description: `Serah Terima Jabatan & Penutupan Kas Periode ${period}`,
+      }).catch(() => {});
+
+      await api.createHandover({
+        period,
+        final_balance: Number(finalBalance),
+        unfinished_proker: unfinishedArray,
+        vendor_contacts: vendorsArray,
+      });
+
+      setShowWizard(false);
+      setPeriod("");
+      setUnfinishedText("");
+      setVendorsText("");
+      alert("Berita acara serah terima berhasil diinisiasi!");
+      fetchHandovers();
+    } catch (err: any) {
+      alert("Gagal membuat berita acara: " + err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSignSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!signingItem) return;
+    setSubmittingSign(true);
+    try {
+      await api.signHandover(signingItem.id, {
+        signature_role: sigRole,
+        signature,
+      });
+      setSigningItem(null);
+      setSignature("");
+      alert("Dokumen berhasil ditandatangani!");
+      fetchHandovers();
+    } catch (err: any) {
+      alert("Gagal tanda tangan: " + err.message);
+    } finally {
+      setSubmittingSign(false);
+    }
+  };
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat("id-ID", {
@@ -32,6 +125,8 @@ export default function HandoverPage() {
       maximumFractionDigits: 0,
     }).format(val);
   };
+
+  const canCreate = user?.role === "Trimitra" || user?.role === "Pembina";
 
   return (
     <div className="animate-fade-in">
@@ -42,15 +137,17 @@ export default function HandoverPage() {
             Arsip berita acara serah terima jabatan pengurus lintas periode
           </p>
         </div>
-        <button className="btn-primary">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="17 1 21 5 17 9" />
-            <path d="M3 11V9a4 4 0 014-4h14" />
-            <polyline points="7 23 3 19 7 15" />
-            <path d="M21 13v2a4 4 0 01-4 4H3" />
-          </svg>
-          Mulai Handover Wizard
-        </button>
+        {canCreate && (
+          <button onClick={() => setShowWizard(true)} className="btn-primary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="17 1 21 5 17 9" />
+              <path d="M3 11V9a4 4 0 014-4h14" />
+              <polyline points="7 23 3 19 7 15" />
+              <path d="M21 13v2a4 4 0 01-4 4H3" />
+            </svg>
+            Mulai Handover Wizard
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -94,12 +191,12 @@ export default function HandoverPage() {
                 <p className="text-xs text-[var(--text-muted)] font-semibold uppercase mb-3">Status Tanda Tangan Digital</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {[
-                    { role: "Ketua Lama", sign: h.signature_old_ketua },
-                    { role: "Ketua Baru", sign: h.signature_new_ketua },
-                    { role: "Pembina OSIS", sign: h.signature_pembina },
+                    { label: "Ketua Lama (Trimitra)", sign: h.signature_old_ketua },
+                    { label: "Ketua Baru (Trimitra)", sign: h.signature_new_ketua },
+                    { label: "Pembina OSIS (Pembina)", sign: h.signature_pembina },
                   ].map((s) => (
-                    <div key={s.role} className="p-3 rounded-lg border border-[var(--border)] flex items-center justify-between">
-                      <span className="text-xs font-medium">{s.role}</span>
+                    <div key={s.label} className="p-3 rounded-lg border border-[var(--border)] flex items-center justify-between">
+                      <span className="text-xs font-medium">{s.label}</span>
                       <span className={`badge ${s.sign ? "badge-success" : "badge-warning"}`}>
                         {s.sign ? "Ditandatangani" : "Menunggu"}
                       </span>
@@ -108,12 +205,123 @@ export default function HandoverPage() {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 mt-6">
-                <button className="btn-secondary text-xs">Unduh PDF</button>
-                <button className="btn-primary text-xs">Tanda Tangani</button>
-              </div>
+              {user?.role !== "Anggota" && (
+                <div className="flex justify-end gap-2 mt-6">
+                  <button onClick={() => setSigningItem(h)} className="btn-primary text-xs">
+                    Tanda Tangani
+                  </button>
+                </div>
+              )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Handover Wizard Modal */}
+      {showWizard && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="glass-card p-6 w-full max-w-lg space-y-4">
+            <h3 className="text-lg font-semibold">🔄 Inisiasi Serah Terima Jabatan</h3>
+            <form onSubmit={handleCreateHandover} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Periode Transisi</label>
+                <input
+                  type="text"
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value)}
+                  placeholder="Contoh: 2024/2025 -> 2025/2026"
+                  className="input-field"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Saldo Kas Terakhir (Rp)</label>
+                <input
+                  type="number"
+                  value={finalBalance}
+                  onChange={(e) => setFinalBalance(e.target.value)}
+                  className="input-field"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Proker Belum Selesai (Satu per baris)</label>
+                <textarea
+                  rows={2}
+                  value={unfinishedText}
+                  onChange={(e) => setUnfinishedText(e.target.value)}
+                  placeholder="Contoh: Laporan LPJ Classmeeting&#10;Pengembalian inventaris tenda"
+                  className="input-field resize-none text-xs"
+                ></textarea>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Daftar Vendor/Hubungan Eksternal (Format: Nama : Kontak)</label>
+                <textarea
+                  rows={2}
+                  value={vendorsText}
+                  onChange={(e) => setVendorsText(e.target.value)}
+                  placeholder="Contoh: Baju Konveksi Cepat : 0812345678&#10;Sewa Sound System : 089876543"
+                  className="input-field resize-none text-xs"
+                ></textarea>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowWizard(false)} className="btn-secondary text-xs">
+                  Batal
+                </button>
+                <button type="submit" disabled={submitting} className="btn-primary text-xs">
+                  {submitting ? "Memproses..." : "Inisiasi Handover"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Signing Modal */}
+      {signingItem && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="glass-card p-6 w-full max-w-sm space-y-4">
+            <h3 className="text-lg font-semibold">✍️ Tanda Tangani Dokumen</h3>
+            <form onSubmit={handleSignSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Peran Tanda Tangan</label>
+                <select
+                  value={sigRole}
+                  onChange={(e) => setSigRole(e.target.value)}
+                  className="input-field bg-[var(--bg-primary)]"
+                >
+                  <option value="old_ketua">Ketua Lama (Trimitra)</option>
+                  <option value="new_ketua">Ketua Baru (Trimitra)</option>
+                  <option value="pembina">Pembina OSIS (Pembina)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Nama / Tanda Tangan Digital (Ketik Nama Lengkap)</label>
+                <input
+                  type="text"
+                  value={signature}
+                  onChange={(e) => setSignature(e.target.value)}
+                  placeholder="Ketik nama lengkap Anda"
+                  className="input-field"
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setSigningItem(null)} className="btn-secondary text-xs">
+                  Batal
+                </button>
+                <button type="submit" disabled={submittingSign} className="btn-primary text-xs">
+                  {submittingSign ? "Menandatangani..." : "Konfirmasi TTD"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
