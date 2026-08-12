@@ -69,6 +69,24 @@ type MessageResponse struct {
 //encore:api auth path=/meeting method=POST
 func Create(ctx context.Context, params *CreateParams) (*MeetingDetail, error) {
 	nis, _ := auth.UserID()
+	userData := auth.Data().(*user.UserData)
+
+	if userData.Role == "Anggota" {
+		return nil, &errs.Error{
+			Code:    errs.PermissionDenied,
+			Message: "only Ketua Bidang, Trimitra, Sekretariat, or Pembina can schedule meetings",
+		}
+	}
+
+	if userData.Role == "Ketua Bidang" {
+		if params.DivisionID == nil || userData.DivisionID == nil || *params.DivisionID != *userData.DivisionID {
+			return nil, &errs.Error{
+				Code:    errs.PermissionDenied,
+				Message: "you can only schedule meetings for your own division",
+			}
+		}
+	}
+
 	var divID, prokID sql.NullInt32
 	if params.DivisionID != nil {
 		divID.Valid = true

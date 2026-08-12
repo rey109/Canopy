@@ -284,4 +284,36 @@ export const api = {
         created_at: string;
       }[];
     }>("/handovers"),
+
+  // Special Division Modules
+  getB1Events: () => request<{ events: any[] }>("/special/b1"),
+  createB1Event: (data: any) => request<any>("/special/b1", { method: "POST", body: JSON.stringify(data) }),
+
+  getB2Records: () => request<{ records: any[] }>("/special/b2"),
+  createB2Record: (data: any) => request<any>("/special/b2", { method: "POST", body: JSON.stringify(data) }),
+
+  getB3Rosters: () => request<{ rosters: any[] }>("/special/b3"),
+  createB3Roster: (data: any) => request<any>("/special/b3", { method: "POST", body: JSON.stringify(data) }),
+
+  getB4Competitions: () => request<{ competitions: any[] }>("/special/b4"),
+  createB4Competition: (data: any) => request<any>("/special/b4", { method: "POST", body: JSON.stringify(data) }),
+
+  getB5Surveys: () => request<{ surveys: any[] }>("/special/b5"),
+  createB5Survey: (data: any) => request<any>("/special/b5", { method: "POST", body: JSON.stringify(data) }),
+  voteB5Survey: (id: number, vote: string) => request<any>(`/special/b5/${id}/vote`, { method: "POST", body: JSON.stringify({ vote }) }),
+
+  getB6Sales: () => request<{ sales: any[] }>("/special/b6"),
+  createB6Sale: (data: any) => request<any>("/special/b6", { method: "POST", body: JSON.stringify(data) }),
+
+  getB7Visits: () => request<{ visits: any[] }>("/special/b7"),
+  createB7Visit: (data: any) => request<any>("/special/b7", { method: "POST", body: JSON.stringify(data) }),
+
+  getB8Mading: () => request<{ mading: any[] }>("/special/b8"),
+  createB8Mading: (data: any) => request<any>("/special/b8", { method: "POST", body: JSON.stringify(data) }),
+
+  getB9Links: () => request<{ links: any[] }>("/special/b9"),
+  createB9Link: (data: any) => request<any>("/special/b9", { method: "POST", body: JSON.stringify(data) }),
+
+  getB10Words: () => request<{ words: any[] }>("/special/b10"),
+  createB10Word: (data: any) => request<any>("/special/b10", { method: "POST", body: JSON.stringify(data) }),
 };
