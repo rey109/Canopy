@@ -1,0 +1,3 @@
+CREATE TYPE asset_status AS ENUM ('Available', 'Maintenance', 'Booked');
+
+ALTER TABLE assets ALTER COLUMN status TYPE asset_status USING status::asset_status;
