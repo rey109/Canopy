@@ -1,0 +1,17 @@
+CREATE TABLE assets (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT DEFAULT '',
+    status VARCHAR(50) NOT NULL DEFAULT 'Available', -- 'Available', 'Maintenance', 'Booked'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE bookings (
+    id SERIAL PRIMARY KEY,
+    asset_id INT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    end_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    proker_id INT DEFAULT NULL,
+    booked_by VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

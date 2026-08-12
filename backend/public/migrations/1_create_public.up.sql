@@ -1,0 +1,26 @@
+CREATE TABLE aspirations (
+    id SERIAL PRIMARY KEY,
+    content TEXT NOT NULL,
+    is_anonymous BOOLEAN NOT NULL DEFAULT true,
+    user_nis VARCHAR(50) DEFAULT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'Diterima', -- 'Diterima', 'Diproses', 'Ditindaklanjuti'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE events (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    date TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_by VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE registrations (
+    id SERIAL PRIMARY KEY,
+    event_id INT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    phone VARCHAR(50) DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

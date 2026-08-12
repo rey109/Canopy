@@ -1,0 +1,11 @@
+CREATE TABLE transactions (
+    id SERIAL PRIMARY KEY,
+    date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    type VARCHAR(10) NOT NULL, -- 'debit' / 'credit'
+    amount NUMERIC(15, 2) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    proker_id INT DEFAULT NULL,
+    proof_url VARCHAR(500) DEFAULT NULL,
+    created_by VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
