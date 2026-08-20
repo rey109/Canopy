@@ -11,7 +11,9 @@ import (
 	"encore.app/user"
 )
 
-var db = sqldb.Named("special")
+var db = sqldb.NewDatabase("special", sqldb.DatabaseConfig{
+	Migrations: "./migrations",
+})
 
 type MessageResponse struct {
 	Message string `json:"message"`

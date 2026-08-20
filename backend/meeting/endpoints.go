@@ -15,7 +15,9 @@ import (
 	"encore.app/user"
 )
 
-var db = sqldb.Named("meeting")
+var db = sqldb.NewDatabase("meeting", sqldb.DatabaseConfig{
+	Migrations: "./migrations",
+})
 
 // ============================================================
 // RAPAT
@@ -433,7 +435,7 @@ type VerifikasiPresensiParams struct {
 	Catatan          *string `json:"catatan"`
 }
 
-//encore:api auth path=/presensi/:id/verifikasi method=POST
+//encore:api auth path=/presensi/verifikasi/:id method=POST
 func VerifikasiPresensi(ctx context.Context, id int, params *VerifikasiPresensiParams) (*PresensiDetail, error) {
 	ud := auth.Data().(*user.UserData)
 	if ud.GroupName != "Sekretaris" && ud.GroupName != "Trimitra" {

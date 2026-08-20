@@ -13,7 +13,9 @@ import (
 	"encore.app/user"
 )
 
-var db = sqldb.Named("finance")
+var db = sqldb.NewDatabase("finance", sqldb.DatabaseConfig{
+	Migrations: "./migrations",
+})
 
 // ============================================================
 // KATEGORI TRANSAKSI

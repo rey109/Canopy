@@ -162,9 +162,9 @@ func GetProfile(ctx context.Context) (*UserDetail, error) {
 // ============================================================
 
 type ListUsersParams struct {
-	DivisionID *int    `query:"division_id"`
-	GroupName  *string `query:"group_name"`
-	PeriodeID  *int    `query:"periode_id"`
+	DivisionID int    `query:"division_id"`
+	GroupName  string `query:"group_name"`
+	PeriodeID  int    `query:"periode_id"`
 }
 
 type ListUsersResponse struct {
@@ -174,12 +174,27 @@ type ListUsersResponse struct {
 //encore:api auth path=/users method=GET
 func ListUsers(ctx context.Context, params *ListUsersParams) (*ListUsersResponse, error) {
 	// Default ke periode aktif jika tidak dispesifikkan
-	periodeID := params.PeriodeID
-	if periodeID == nil {
+	var periodeID *int
+	if params.PeriodeID > 0 {
+		pid := params.PeriodeID
+		periodeID = &pid
+	} else {
 		var pid int
 		if err := db.QueryRow(ctx, "SELECT periode_id FROM periode WHERE is_aktif = TRUE LIMIT 1").Scan(&pid); err == nil {
 			periodeID = &pid
 		}
+	}
+
+	var divisionID *int
+	if params.DivisionID > 0 {
+		divID := params.DivisionID
+		divisionID = &divID
+	}
+
+	var groupName *string
+	if params.GroupName != "" {
+		gName := params.GroupName
+		groupName = &gName
 	}
 
 	rows, err := db.Query(ctx, `
@@ -210,7 +225,7 @@ func ListUsers(ctx context.Context, params *ListUsersParams) (*ListUsersResponse
 		  AND ($2::INT IS NULL OR k.division_id = $2)
 		  AND ($3::TEXT IS NULL OR rg.group_name = $3)
 		ORDER BY rg.group_id, r.level, u.nama
-	`, periodeID, params.DivisionID, params.GroupName)
+	`, periodeID, divisionID, groupName)
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}

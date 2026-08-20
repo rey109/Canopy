@@ -13,7 +13,9 @@ import (
 	"encore.app/user"
 )
 
-var db = sqldb.Named("proker")
+var db = sqldb.NewDatabase("proker", sqldb.DatabaseConfig{
+	Migrations: "./migrations",
+})
 
 // ============================================================
 // PROGRAM KERJA
@@ -263,13 +265,13 @@ func UpdateProkerStatus(ctx context.Context, id int, params *UpdateProkerStatusP
 }
 
 // Get is a private alias dipakai oleh service approval
-//encore:api private path=/proker/:id method=GET
+//encore:api private path=/proker-private/:id method=GET
 func Get(ctx context.Context, id int) (*ProkerDetail, error) {
 	return GetProker(ctx, id)
 }
 
 // UpdateStatus is a private alias dipakai oleh service approval
-//encore:api private path=/proker/:id/update-status method=PUT
+//encore:api private path=/proker-private/:id/update-status method=PUT
 func UpdateStatus(ctx context.Context, id int, params *UpdateProkerStatusParams) error {
 	return UpdateProkerStatus(ctx, id, params)
 }

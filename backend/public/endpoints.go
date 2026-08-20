@@ -13,7 +13,9 @@ import (
 	"encore.app/user"
 )
 
-var db = sqldb.Named("public")
+var db = sqldb.NewDatabase("public", sqldb.DatabaseConfig{
+	Migrations: "./migrations",
+})
 
 // --- Aspirations ---
 

@@ -11,7 +11,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var db = sqldb.Named("user")
+var db = sqldb.NewDatabase("user", sqldb.DatabaseConfig{
+	Migrations: "./migrations",
+})
 var jwtSecret = []byte("canopy-super-secret-key-12345") // For development
 
 // UserData dibawa di setiap request yang sudah login.

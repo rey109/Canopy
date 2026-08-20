@@ -12,7 +12,9 @@ import (
 	"encore.app/user"
 )
 
-var db = sqldb.Named("division")
+var db = sqldb.NewDatabase("division", sqldb.DatabaseConfig{
+	Migrations: "./migrations",
+})
 
 // ============================================================
 // Division

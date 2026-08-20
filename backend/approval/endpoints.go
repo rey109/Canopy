@@ -13,7 +13,9 @@ import (
 	"encore.app/user"
 )
 
-var db = sqldb.Named("approval")
+var db = sqldb.NewDatabase("approval", sqldb.DatabaseConfig{
+	Migrations: "./migrations",
+})
 
 // ============================================================
 // JENIS DOKUMEN

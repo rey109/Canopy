@@ -13,7 +13,9 @@ import (
 	"encore.app/user"
 )
 
-var db = sqldb.Named("asset")
+var db = sqldb.NewDatabase("asset", sqldb.DatabaseConfig{
+	Migrations: "./migrations",
+})
 
 // ============================================================
 // ASSETS

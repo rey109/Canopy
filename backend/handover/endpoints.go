@@ -14,7 +14,9 @@ import (
 	"encore.app/user"
 )
 
-var db = sqldb.Named("handover")
+var db = sqldb.NewDatabase("handover", sqldb.DatabaseConfig{
+	Migrations: "./migrations",
+})
 
 type HandoverDetail struct {
 	ID                  int             `json:"id"`
