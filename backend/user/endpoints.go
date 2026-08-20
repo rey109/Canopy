@@ -560,3 +560,86 @@ func UpdateUserDivision(ctx context.Context, nis string, params *UpdateDivisionP
 	`, divID, nis)
 	return err
 }
+
+type InspectPeriode struct {
+	PeriodeID   int    `json:"periode_id"`
+	TahunAjaran string `json:"tahun_ajaran"`
+	IsAktif     bool   `json:"is_aktif"`
+}
+
+type InspectKepengurusan struct {
+	MembershipID int    `json:"membership_id"`
+	NIS          string `json:"nis"`
+	RoleID       int    `json:"role_id"`
+	DivisionID   int    `json:"division_id"`
+	PeriodeID    int    `json:"periode_id"`
+	Status       string `json:"status"`
+}
+
+type InspectUser struct {
+	NIS        string `json:"nis"`
+	Nama       string `json:"nama"`
+	Jurusan    string `json:"jurusan"`
+	TahunMasuk int    `json:"tahun_masuk"`
+}
+
+type DBInfo struct {
+	UsersCount        int                   `json:"users_count"`
+	KepengurusanCount int                   `json:"kepengurusan_count"`
+	PeriodeCount      int                   `json:"periode_count"`
+	RolesCount        int                   `json:"roles_count"`
+	RoleGroupsCount   int                   `json:"role_groups_count"`
+	Periodes          []InspectPeriode      `json:"periodes"`
+	Kepengurusans     []InspectKepengurusan `json:"kepengurusans"`
+	Users             []InspectUser         `json:"users"`
+}
+
+//encore:api public path=/inspect-db method=GET
+func InspectDB(ctx context.Context) (*DBInfo, error) {
+	var info DBInfo
+
+	_ = db.QueryRow(ctx, "SELECT COUNT(*) FROM users").Scan(&info.UsersCount)
+	_ = db.QueryRow(ctx, "SELECT COUNT(*) FROM kepengurusan").Scan(&info.KepengurusanCount)
+	_ = db.QueryRow(ctx, "SELECT COUNT(*) FROM periode").Scan(&info.PeriodeCount)
+	_ = db.QueryRow(ctx, "SELECT COUNT(*) FROM roles").Scan(&info.RolesCount)
+	_ = db.QueryRow(ctx, "SELECT COUNT(*) FROM role_groups").Scan(&info.RoleGroupsCount)
+
+	pRows, err := db.Query(ctx, "SELECT periode_id, tahun_ajaran, is_aktif FROM periode")
+	if err == nil {
+		defer pRows.Close()
+		for pRows.Next() {
+			var p InspectPeriode
+			if err := pRows.Scan(&p.PeriodeID, &p.TahunAjaran, &p.IsAktif); err == nil {
+				info.Periodes = append(info.Periodes, p)
+			}
+		}
+	}
+
+	kRows, err := db.Query(ctx, "SELECT membership_id, nis, role_id, division_id, periode_id, status FROM kepengurusan")
+	if err == nil {
+		defer kRows.Close()
+		for kRows.Next() {
+			var k InspectKepengurusan
+			var divID sql.NullInt32
+			if err := kRows.Scan(&k.MembershipID, &k.NIS, &k.RoleID, &divID, &k.PeriodeID, &k.Status); err == nil {
+				if divID.Valid {
+					k.DivisionID = int(divID.Int32)
+				}
+				info.Kepengurusans = append(info.Kepengurusans, k)
+			}
+		}
+	}
+
+	uRows, err := db.Query(ctx, "SELECT nis, nama, jurusan, tahun_masuk FROM users LIMIT 10")
+	if err == nil {
+		defer uRows.Close()
+		for uRows.Next() {
+			var u InspectUser
+			if err := uRows.Scan(&u.NIS, &u.Nama, &u.Jurusan, &u.TahunMasuk); err == nil {
+				info.Users = append(info.Users, u)
+			}
+		}
+	}
+
+	return &info, nil
+}
