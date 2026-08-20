@@ -1,4 +1,44 @@
 -- ============================================================
+-- Ensure all redesign tables exist (for existing databases)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS role_groups (
+    group_id    SERIAL PRIMARY KEY,
+    group_name  VARCHAR(100) NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS divisions (
+    division_id   SERIAL PRIMARY KEY,
+    division_name VARCHAR(255) NOT NULL UNIQUE,
+    deskripsi     TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS roles (
+    role_id              SERIAL PRIMARY KEY,
+    group_id             INT NOT NULL REFERENCES role_groups(group_id),
+    role_name            VARCHAR(100) NOT NULL,
+    level                INT NOT NULL DEFAULT 1,
+    scope_divisi_awal    INT DEFAULT NULL REFERENCES divisions(division_id),
+    scope_divisi_akhir   INT DEFAULT NULL REFERENCES divisions(division_id)
+);
+
+CREATE TABLE IF NOT EXISTS periode (
+    periode_id   SERIAL PRIMARY KEY,
+    tahun_ajaran VARCHAR(20) NOT NULL UNIQUE,
+    saldo_awal   NUMERIC(15,2) NOT NULL DEFAULT 0.00,
+    is_aktif     BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS kepengurusan (
+    membership_id  SERIAL PRIMARY KEY,
+    nis            VARCHAR(50) NOT NULL REFERENCES users(nis),
+    role_id        INT NOT NULL REFERENCES roles(role_id),
+    division_id    INT DEFAULT NULL REFERENCES divisions(division_id),
+    periode_id     INT NOT NULL REFERENCES periode(periode_id),
+    status         VARCHAR(20) NOT NULL DEFAULT 'Aktif',
+    UNIQUE(nis, periode_id)
+);
+
+-- ============================================================
 -- Redesign schema adjustment for users table (safe migration)
 -- ============================================================
 DO $$
