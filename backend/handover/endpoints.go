@@ -17,27 +17,32 @@ import (
 var db = sqldb.Named("handover")
 
 type HandoverDetail struct {
-	ID                int             `json:"id"`
-	Period            string          `json:"period"`
-	FinalBalance      float64         `json:"final_balance"`
-	UnfinishedProker  json.RawMessage `json:"unfinished_proker"`
-	VendorContacts    json.RawMessage `json:"vendor_contacts"`
-	SignatureOldKetua string          `json:"signature_old_ketua"`
-	SignatureNewKetua string          `json:"signature_new_ketua"`
-	SignaturePembina  string          `json:"signature_pembina"`
-	CreatedAt         time.Time       `json:"created_at"`
+	ID                  int             `json:"id"`
+	PeriodeLama         string          `json:"periode_lama"`
+	PeriodeBaru         string          `json:"periode_baru"`
+	SaldoAkhir          float64         `json:"saldo_akhir"`
+	ProkerBelumSelesai  json.RawMessage `json:"proker_belum_selesai"`
+	KontakVendor        json.RawMessage `json:"kontak_vendor"`
+	Catatan             string          `json:"catatan"`
+	SignatureKetuaLama  string          `json:"signature_ketua_lama"`
+	SignatureKetuaBaru  string          `json:"signature_ketua_baru"`
+	SignaturePembina    string          `json:"signature_pembina"`
+	DibuatOleh          string          `json:"dibuat_oleh"`
+	CreatedAt           time.Time       `json:"created_at"`
 }
 
 type CreateHandoverParams struct {
-	Period           string          `json:"period"`
-	FinalBalance     float64         `json:"final_balance"`
-	UnfinishedProker json.RawMessage `json:"unfinished_proker"`
-	VendorContacts   json.RawMessage `json:"vendor_contacts"`
+	PeriodeLama        string          `json:"periode_lama"`
+	PeriodeBaru        string          `json:"periode_baru"`
+	SaldoAkhir         float64         `json:"saldo_akhir"`
+	ProkerBelumSelesai json.RawMessage `json:"proker_belum_selesai"`
+	KontakVendor       json.RawMessage `json:"kontak_vendor"`
+	Catatan            string          `json:"catatan"`
 }
 
 type SignParams struct {
-	SignatureRole string `json:"signature_role"` // 'old_ketua', 'new_ketua', 'pembina'
-	Signature     string `json:"signature"`      // base64 or URL
+	SignatureRole string `json:"signature_role"` // 'ketua_lama', 'ketua_baru', 'pembina'
+	Signature     string `json:"signature"`      // base64 atau URL
 }
 
 type ListResponse struct {
@@ -50,32 +55,43 @@ type MessageResponse struct {
 
 //encore:api auth path=/handover method=POST
 func Create(ctx context.Context, params *CreateHandoverParams) (*HandoverDetail, error) {
-	userData := auth.Data().(*user.UserData)
-	if userData.Role != "Trimitra" && userData.Role != "Pembina" {
+	nis, _ := auth.UserID()
+	ud := auth.Data().(*user.UserData)
+
+	if ud.GroupName != "Trimitra" && ud.GroupName != "Pembina" {
 		return nil, &errs.Error{
 			Code:    errs.PermissionDenied,
-			Message: "only Trimitra or Pembina can create handover records",
+			Message: "hanya Trimitra atau Pembina yang dapat membuat catatan serah terima",
 		}
 	}
 
-	unfinished := params.UnfinishedProker
-	if unfinished == nil {
-		unfinished = json.RawMessage("[]")
+	proker := params.ProkerBelumSelesai
+	if proker == nil {
+		proker = json.RawMessage("[]")
 	}
-	vendors := params.VendorContacts
-	if vendors == nil {
-		vendors = json.RawMessage("[]")
+	vendor := params.KontakVendor
+	if vendor == nil {
+		vendor = json.RawMessage("[]")
 	}
 
 	var h HandoverDetail
 	err := db.QueryRow(ctx, `
-		INSERT INTO handover_records (period, final_balance, unfinished_proker, vendor_contacts)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, period, final_balance, unfinished_proker, vendor_contacts,
-		          signature_old_ketua, signature_new_ketua, signature_pembina, created_at
-	`, params.Period, params.FinalBalance, string(unfinished), string(vendors)).
-		Scan(&h.ID, &h.Period, &h.FinalBalance, &h.UnfinishedProker, &h.VendorContacts,
-			&h.SignatureOldKetua, &h.SignatureNewKetua, &h.SignaturePembina, &h.CreatedAt)
+		INSERT INTO handover_records
+			(periode_lama, periode_baru, saldo_akhir, proker_belum_selesai,
+			 kontak_vendor, catatan, dibuat_oleh)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, periode_lama, periode_baru, saldo_akhir,
+		          proker_belum_selesai, kontak_vendor, catatan,
+		          signature_ketua_lama, signature_ketua_baru,
+		          signature_pembina, dibuat_oleh, created_at
+	`, params.PeriodeLama, params.PeriodeBaru, params.SaldoAkhir,
+		string(proker), string(vendor), params.Catatan, string(nis)).
+		Scan(
+			&h.ID, &h.PeriodeLama, &h.PeriodeBaru, &h.SaldoAkhir,
+			&h.ProkerBelumSelesai, &h.KontakVendor, &h.Catatan,
+			&h.SignatureKetuaLama, &h.SignatureKetuaBaru,
+			&h.SignaturePembina, &h.DibuatOleh, &h.CreatedAt,
+		)
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}
@@ -85,8 +101,10 @@ func Create(ctx context.Context, params *CreateHandoverParams) (*HandoverDetail,
 //encore:api auth path=/handovers method=GET
 func List(ctx context.Context) (*ListResponse, error) {
 	rows, err := db.Query(ctx, `
-		SELECT id, period, final_balance, unfinished_proker, vendor_contacts,
-		       signature_old_ketua, signature_new_ketua, signature_pembina, created_at
+		SELECT id, periode_lama, periode_baru, saldo_akhir,
+		       proker_belum_selesai, kontak_vendor, catatan,
+		       signature_ketua_lama, signature_ketua_baru,
+		       signature_pembina, dibuat_oleh, created_at
 		FROM handover_records ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -94,31 +112,40 @@ func List(ctx context.Context) (*ListResponse, error) {
 	}
 	defer rows.Close()
 
-	var handovers []HandoverDetail
+	var list []HandoverDetail
 	for rows.Next() {
 		var h HandoverDetail
-		err := rows.Scan(&h.ID, &h.Period, &h.FinalBalance, &h.UnfinishedProker, &h.VendorContacts,
-			&h.SignatureOldKetua, &h.SignatureNewKetua, &h.SignaturePembina, &h.CreatedAt)
-		if err != nil {
+		if err := rows.Scan(
+			&h.ID, &h.PeriodeLama, &h.PeriodeBaru, &h.SaldoAkhir,
+			&h.ProkerBelumSelesai, &h.KontakVendor, &h.Catatan,
+			&h.SignatureKetuaLama, &h.SignatureKetuaBaru,
+			&h.SignaturePembina, &h.DibuatOleh, &h.CreatedAt,
+		); err != nil {
 			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 		}
-		handovers = append(handovers, h)
+		list = append(list, h)
 	}
-	return &ListResponse{Handovers: handovers}, nil
+	return &ListResponse{Handovers: list}, nil
 }
 
 //encore:api auth path=/handover/:id method=GET
 func Get(ctx context.Context, id int) (*HandoverDetail, error) {
 	var h HandoverDetail
 	err := db.QueryRow(ctx, `
-		SELECT id, period, final_balance, unfinished_proker, vendor_contacts,
-		       signature_old_ketua, signature_new_ketua, signature_pembina, created_at
+		SELECT id, periode_lama, periode_baru, saldo_akhir,
+		       proker_belum_selesai, kontak_vendor, catatan,
+		       signature_ketua_lama, signature_ketua_baru,
+		       signature_pembina, dibuat_oleh, created_at
 		FROM handover_records WHERE id = $1
-	`, id).Scan(&h.ID, &h.Period, &h.FinalBalance, &h.UnfinishedProker, &h.VendorContacts,
-		&h.SignatureOldKetua, &h.SignatureNewKetua, &h.SignaturePembina, &h.CreatedAt)
+	`, id).Scan(
+		&h.ID, &h.PeriodeLama, &h.PeriodeBaru, &h.SaldoAkhir,
+		&h.ProkerBelumSelesai, &h.KontakVendor, &h.Catatan,
+		&h.SignatureKetuaLama, &h.SignatureKetuaBaru,
+		&h.SignaturePembina, &h.DibuatOleh, &h.CreatedAt,
+	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, &errs.Error{Code: errs.NotFound, Message: "handover record not found"}
+			return nil, &errs.Error{Code: errs.NotFound, Message: "catatan serah terima tidak ditemukan"}
 		}
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}
@@ -127,36 +154,35 @@ func Get(ctx context.Context, id int) (*HandoverDetail, error) {
 
 //encore:api auth path=/handover/:id/sign method=POST
 func Sign(ctx context.Context, id int, params *SignParams) (*MessageResponse, error) {
-	userData := auth.Data().(*user.UserData)
+	ud := auth.Data().(*user.UserData)
 
 	var column string
 	switch params.SignatureRole {
-	case "old_ketua":
-		if userData.Role != "Trimitra" {
-			return nil, &errs.Error{Code: errs.PermissionDenied, Message: "only Trimitra (old ketua) can sign as old_ketua"}
+	case "ketua_lama":
+		if ud.GroupName != "Trimitra" {
+			return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Trimitra (ketua lama) yang dapat menandatangani sebagai ketua_lama"}
 		}
-		column = "signature_old_ketua"
-	case "new_ketua":
-		if userData.Role != "Trimitra" {
-			return nil, &errs.Error{Code: errs.PermissionDenied, Message: "only Trimitra (new ketua) can sign as new_ketua"}
+		column = "signature_ketua_lama"
+	case "ketua_baru":
+		if ud.GroupName != "Trimitra" {
+			return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Trimitra (ketua baru) yang dapat menandatangani sebagai ketua_baru"}
 		}
-		column = "signature_new_ketua"
+		column = "signature_ketua_baru"
 	case "pembina":
-		if userData.Role != "Pembina" {
-			return nil, &errs.Error{Code: errs.PermissionDenied, Message: "only Pembina can sign as pembina"}
+		if ud.GroupName != "Pembina" {
+			return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Pembina yang dapat menandatangani sebagai pembina"}
 		}
 		column = "signature_pembina"
 	default:
-		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "signature_role must be 'old_ketua', 'new_ketua', or 'pembina'"}
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "signature_role harus 'ketua_lama', 'ketua_baru', atau 'pembina'"}
 	}
 
 	res, err := db.Exec(ctx, "UPDATE handover_records SET "+column+" = $1 WHERE id = $2", params.Signature, id)
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}
-	rows := res.RowsAffected()
-	if rows == 0 {
-		return nil, &errs.Error{Code: errs.NotFound, Message: "handover record not found"}
+	if res.RowsAffected() == 0 {
+		return nil, &errs.Error{Code: errs.NotFound, Message: "catatan serah terima tidak ditemukan"}
 	}
-	return &MessageResponse{Message: "Handover signed successfully"}, nil
+	return &MessageResponse{Message: "Tanda tangan berhasil disimpan"}, nil
 }

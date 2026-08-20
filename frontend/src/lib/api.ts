@@ -32,17 +32,193 @@ async function request<T>(
 // ===== AUTH =====
 export interface UserDetail {
   nis: string;
-  name: string;
-  major: string;
-  class: string;
-  role: string;
+  nama: string;
+  jurusan: string;
+  tahun_masuk: number;
+  foto_url: string | null;
+
+  // Keanggotaan aktif
+  membership_id: number;
+  role_id: number;
+  role_name: string;
+  group_id: number;
+  group_name: string; // "Trimitra", "Sekretaris", "Bendahara", "Kepala Divisi", "Staf", "Pembina"
+  level: number;
+
+  // Scope divisi
   division_id: number | null;
-  management_period: string;
+  scope_divisi_awal: number | null;
+  scope_divisi_akhir: number | null;
+
+  // Periode aktif
+  periode_id: number;
+  tahun_ajaran: string;
 }
 
 export interface LoginResponse {
   token: string;
   user: UserDetail;
+}
+
+// ===== INBOUND DATA STRUCTS =====
+
+export interface DivisionDetail {
+  division_id: number;
+  division_name: string;
+  deskripsi: string;
+}
+
+export interface ProkerDetail {
+  proker_id: number;
+  division_id: number | null;
+  periode_id: number;
+  nama: string;
+  deskripsi: string;
+  anggaran_disetujui: number;
+  status: string; // 'Belum Mulai', 'Berjalan', 'Selesai', 'Dibatalkan'
+  penanggung_jawab: string | null;
+  tanggal_mulai: string;
+  tanggal_selesai: string;
+  dibuat_oleh: string;
+  created_at: string;
+}
+
+export interface TaskDetail {
+  task_id: number;
+  proker_id: number;
+  template_id: number | null;
+  scope: string; // 'Individual', 'General'
+  assigned_to: string | null;
+  offered_by: string | null;
+  dibuat_oleh: string;
+  judul: string;
+  deskripsi: string;
+  deadline: string;
+  status: string; // 'Tersedia', 'Ditugaskan', 'Ditawarkan', 'Selesai'
+  custom_data: string | null; // JSON string
+  eskalasi_terkirim: boolean;
+  created_at: string;
+}
+
+export interface TaskTemplateDetail {
+  template_id: number;
+  division_id: number;
+  nama_template: string;
+  dibuat_oleh: string;
+  created_at: string;
+  fields: {
+    field_id: number;
+    template_id: number;
+    label: string;
+    tipe_input: string; // 'Teks', 'Angka', 'Tanggal', 'Dropdown', 'File', 'Checkbox'
+    opsi_dropdown: string | null;
+    wajib: boolean;
+    urutan: number;
+  }[];
+}
+
+export interface TransaksiDetail {
+  transaksi_id: number;
+  proker_id: number | null;
+  kategori_id: number | null;
+  kategori_nama: string | null;
+  dicatat_oleh: string;
+  jenis: string; // 'Masuk', 'Keluar'
+  nominal: number;
+  deskripsi: string;
+  bukti_url: string | null;
+  sumber: string; // 'Manual', 'Scan Nota'
+  is_berisiko: boolean;
+  status: string; // 'Menunggu Verifikasi', 'Menunggu Approval Umum', 'Disetujui', 'Ditolak'
+  alasan_penolakan: string | null;
+  tanggal: string;
+  created_at: string;
+}
+
+export interface DokumenDetail {
+  dokumen_id: number;
+  proker_id: number | null;
+  jenis_id: number;
+  jenis_nama: string;
+  diunggah_oleh: string;
+  diperiksa_oleh: string | null;
+  file_url: string;
+  is_eksternal: boolean;
+  status: string; // 'Draft', 'Menunggu Kelengkapan', 'Perlu Revisi', 'Menunggu Approval Berjenjang', 'Disetujui'
+  catatan_revisi: string | null;
+  versi: number;
+  created_at: string;
+  updated_at: string;
+  persetujuan?: PersetujuanDetail[];
+}
+
+export interface PersetujuanDetail {
+  persetujuan_id: number;
+  dokumen_id: number;
+  urutan: number;
+  approver_group_name: string;
+  disetujui_oleh: string | null;
+  keputusan: string; // 'Menunggu', 'Disetujui', 'Ditolak'
+  catatan: string | null;
+  waktu: string | null;
+}
+
+export interface RapatDetail {
+  rapat_id: number;
+  periode_id: number;
+  division_id: number | null;
+  judul: string;
+  tanggal: string;
+  lokasi: string;
+  agenda: string;
+  dibuat_oleh: string;
+  status: string; // 'Terjadwal', 'Berlangsung', 'Selesai'
+  qr_code?: string;
+  created_at: string;
+}
+
+export interface PresensiDetail {
+  presensi_id: number;
+  acara_type: string; // 'Rapat', 'Kegiatan'
+  acara_id: number;
+  nis: string;
+  tipe: string; // 'Hadir', 'Izin', 'Sakit', 'Alpa'
+  keterangan: string | null;
+  bukti_url: string | null;
+  foto_url: string | null;
+  status_verifikasi: string; // 'Menunggu', 'Disetujui', 'Ditolak'
+  waktu_submit: string;
+}
+
+export interface NotulensiDetail {
+  notulensi_id: number;
+  rapat_id: number;
+  isi: string;
+  difinalisasi_oleh: string | null;
+  status: string; // 'Draft', 'Final'
+  updated_at: string;
+}
+
+export interface PengumumanDetail {
+  pengumuman_id: number;
+  judul: string;
+  isi: string;
+  dibuat_oleh: string;
+  target: string; // 'Organisasi', 'Divisi'
+  division_id: number | null;
+  tanggal: string;
+}
+
+export interface ModuleEntry {
+  module_id: number;
+  module_name: string;
+  is_core: boolean;
+}
+
+export interface NavModulesResponse {
+  core_modules: ModuleEntry[];
+  role_modules: ModuleEntry[];
+  divisi_modules: ModuleEntry[];
 }
 
 export const api = {
@@ -55,12 +231,9 @@ export const api = {
 
   register: (data: {
     nis: string;
-    name: string;
-    major: string;
-    class: string;
-    role: string;
-    division_id?: number;
-    management_period: string;
+    nama: string;
+    jurusan: string;
+    tahun_masuk: number;
     password: string;
   }) =>
     request<{ message: string }>("/user/register", {
@@ -70,183 +243,344 @@ export const api = {
 
   getProfile: () => request<UserDetail>("/user/profile"),
 
-  listUsers: () =>
-    request<{ users: UserDetail[] }>("/users"),
+  listUsers: (params?: { division_id?: number; group_name?: string; periode_id?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.division_id !== undefined) q.set("division_id", String(params.division_id));
+    if (params?.group_name !== undefined) q.set("group_name", params.group_name);
+    if (params?.periode_id !== undefined) q.set("periode_id", String(params.periode_id));
+    const qs = q.toString();
+    return request<{ users: UserDetail[] }>(`/users${qs ? "?" + qs : ""}`);
+  },
 
-  // Divisions
-  listDivisions: () =>
-    request<{
-      divisions: {
-        id: number;
-        name: string;
-        description: string;
-        chair_nis: string | null;
-      }[];
-    }>("/division"),
-
-  // Proker
-  listProkers: () =>
-    request<{
-      prokers: {
-        id: number;
-        name: string;
-        description: string;
-        division_id: number;
-        budget: number;
-        status: string;
-        start_date: string;
-        end_date: string;
-        created_by: string;
-        created_at: string;
-      }[];
-    }>("/prokers"),
-
-  createProker: (data: {
-    name: string;
-    description: string;
-    division_id: number;
-    budget: number;
-    start_date: string;
-    end_date: string;
-  }) =>
-    request<unknown>("/proker", {
+  assignMembership: (data: { nis: string; role_id: number; division_id?: number; periode_id: number }) =>
+    request<{ membership_id: number; message: string }>("/user/membership", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
-  // Approvals
-  submitProposal: (proker_id: number) =>
-    request<{ message: string }>("/approvals/submit-proposal", {
-      method: "POST",
-      body: JSON.stringify({ proker_id }),
-    }),
-
-  listPendingApprovals: () =>
+  getRiwayatJabatan: (nis: string) =>
     request<{
-      approvals: {
-        id: number;
-        document_type: string;
-        document_id: number;
-        step: number;
+      riwayat: {
+        membership_id: number;
+        role_id: number;
+        role_name: string;
+        group_name: string;
+        division_id: number | null;
+        periode_id: number;
+        tahun_ajaran: string;
         status: string;
-        approver_role: string;
-        approved_by: string | null;
-        revision_notes: string | null;
-        created_at: string;
-        updated_at: string;
       }[];
-    }>("/approvals/list-pending"),
+    }>(`/users/${nis}/riwayat`),
 
-  actionApproval: (id: number, status: string, revision_notes: string) =>
-    request<{ message: string }>(`/approvals/action/${id}`, {
+  listRoles: () =>
+    request<{
+      roles: {
+        role_id: number;
+        group_id: number;
+        group_name: string;
+        role_name: string;
+        level: number;
+        scope_divisi_awal: number | null;
+        scope_divisi_akhir: number | null;
+      }[];
+    }>("/roles"),
+
+  listPeriode: () =>
+    request<{
+      periode: {
+        periode_id: number;
+        tahun_ajaran: string;
+        saldo_awal: number;
+        is_aktif: boolean;
+      }[];
+    }>("/periode"),
+
+  // Divisions
+  listDivisions: () =>
+    request<{ divisions: DivisionDetail[] }>("/divisions"),
+
+  getDivision: (id: number) =>
+    request<DivisionDetail>(`/divisions/${id}`),
+
+  getNavModules: () =>
+    request<NavModulesResponse>("/nav/modules"),
+
+  assignDivisiModule: (division_id: number, module_id: number) =>
+    request<{ message: string }>("/divisions/module", {
       method: "POST",
-      body: JSON.stringify({ status, revision_notes }),
+      body: JSON.stringify({ division_id, module_id }),
     }),
+
+  listModules: () =>
+    request<{ modules: ModuleEntry[] }>("/modules"),
+
+  // Proker
+  listProkers: () =>
+    request<{ prokers: ProkerDetail[] }>("/prokers"),
+
+  getProker: (id: number) =>
+    request<ProkerDetail>(`/proker/${id}`),
+
+  createProker: (data: {
+    nama: string;
+    deskripsi: string;
+    division_id?: number;
+    anggaran_disetujui: number;
+    penanggung_jawab?: string;
+    tanggal_mulai: string;
+    tanggal_selesai: string;
+  }) =>
+    request<ProkerDetail>("/proker", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  // Task Template
+  createTaskTemplate: (data: {
+    nama_template: string;
+    fields: {
+      label: string;
+      tipe_input: string;
+      opsi_dropdown?: string;
+      wajib: boolean;
+      urutan: number;
+    }[];
+  }) =>
+    request<TaskTemplateDetail>("/task-template", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listTaskTemplates: () =>
+    request<{ templates: TaskTemplateDetail[] }>("/task-templates"),
+
+  // Tasks
+  createTask: (data: {
+    proker_id: number;
+    template_id?: number;
+    scope: string; // 'Individual', 'General'
+    assigned_to?: string;
+    judul: string;
+    deskripsi: string;
+    deadline: string;
+    custom_data?: string;
+  }) =>
+    request<TaskDetail>("/task", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listTasks: () =>
+    request<{ tasks: TaskDetail[] }>("/tasks"),
+
+  tawarkanTask: (id: number) =>
+    request<TaskDetail>(`/task/${id}/tawarkan`, { method: "POST" }),
+
+  ambilTask: (id: number) =>
+    request<TaskDetail>(`/task/${id}/ambil`, { method: "POST" }),
+
+  selelesaikanTask: (id: number) =>
+    request<TaskDetail>(`/task/${id}/selesai`, { method: "POST" }),
+
+  // Catatan Pembinaan
+  createCatatanPembinaan: (proker_id: number, isi: string) =>
+    request<{ catatan_id: number; proker_id: number; dibuat_oleh: string; isi: string; tanggal: string }>("/catatan-pembinaan", {
+      method: "POST",
+      body: JSON.stringify({ proker_id, isi }),
+    }),
+
+  listCatatanPembinaan: (proker_id: number) =>
+    request<{ catatan: { catatan_id: number; proker_id: number; dibuat_oleh: string; isi: string; tanggal: string }[] }>(`/catatan-pembinaan/${proker_id}`),
 
   // Finance
   listTransactions: () =>
     request<{
-      transactions: {
-        id: number;
-        date: string;
-        type: string;
-        amount: number;
-        description: string;
-        proker_id: number | null;
-        proof_url: string | null;
-        created_by: string;
-        created_at: string;
-      }[];
-      total_debit: number;
-      total_credit: number;
-      balance: number;
-    }>("/finance/transactions"),
+      transaksi: TransaksiDetail[];
+      total_masuk: number;
+      total_keluar: number;
+      saldo: number;
+    }>("/finance/transaksi"),
 
   createTransaction: (data: {
-    date: string;
-    type: string;
-    amount: number;
-    description: string;
     proker_id?: number;
-    proof_url?: string;
+    kategori_id?: number;
+    jenis: string; // 'Masuk', 'Keluar'
+    nominal: number;
+    deskripsi: string;
+    bukti_url?: string;
+    sumber?: string; // 'Manual', 'Scan Nota'
+    is_berisiko?: boolean;
+    tanggal: string;
   }) =>
-    request<unknown>("/finance/transaction", {
+    request<TransaksiDetail>("/finance/transaksi", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
   getBalance: () =>
     request<{
-      total_debit: number;
-      total_credit: number;
-      balance: number;
-    }>("/finance/balance"),
+      total_masuk: number;
+      total_keluar: number;
+      saldo: number;
+    }>("/finance/saldo"),
+
+  getAnggaranProker: (proker_id: number) =>
+    request<{
+      proker_id: number;
+      anggaran_disetujui: number;
+      terpakai: number;
+      persentase: number;
+      status_alarm: string;
+    }>(`/finance/anggaran/${proker_id}`),
+
+  verifikasiScanNota: (id: number, disetujui: boolean, alasan_penolakan?: string) =>
+    request<TransaksiDetail>(`/finance/transaksi/${id}/verifikasi`, {
+      method: "POST",
+      body: JSON.stringify({ disetujui, alasan_penolakan }),
+    }),
+
+  approvalBerisiko: (id: number, disetujui: boolean, alasan_penolakan?: string) =>
+    request<TransaksiDetail>(`/finance/transaksi/${id}/approval-berisiko`, {
+      method: "POST",
+      body: JSON.stringify({ disetujui, alasan_penolakan }),
+    }),
+
+  listMenungguVerifikasi: () =>
+    request<{ transaksi: TransaksiDetail[] }>("/finance/antrian-verifikasi"),
+
+  listMenungguApprovalBerisiko: () =>
+    request<{ transaksi: TransaksiDetail[] }>("/finance/antrian-berisiko"),
+
+  listKategori: () =>
+    request<{ kategori: { kategori_id: number; nama: string }[] }>("/finance/kategori"),
+
+  // Approvals (Dokumen Persetujuan Berjenjang)
+  listJenisDokumen: () =>
+    request<ListJenisDokumenResponse>("/approval/jenis-dokumen"),
+
+  buatDokumen: (data: {
+    proker_id?: number;
+    jenis_id: number;
+    file_url: string;
+    is_eksternal: boolean;
+  }) =>
+    request<DokumenDetail>("/approval/dokumen", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listDokumen: () =>
+    request<ListDokumenResponse>("/approval/dokumen"),
+
+  getDokumen: (id: number) =>
+    request<DokumenDetail>(`/approval/dokumen/${id}`),
+
+  listPendingApprovals: () =>
+    request<ListPendingResponse>("/approval/pending"),
+
+  actionApproval: (id: number, keputusan: string, catatan?: string) =>
+    request<{ message: string }>(`/approval/persetujuan/${id}/aksi`, {
+      method: "POST",
+      body: JSON.stringify({ keputusan, catatan }),
+    }),
 
   // Meetings
   listMeetings: () =>
-    request<{
-      meetings: {
-        id: number;
-        title: string;
-        schedule: string;
-        division_id: number | null;
-        proker_id: number | null;
-        minutes: string;
-        qc_status: string;
-        created_by: string;
-        created_at: string;
-      }[];
-    }>("/meetings"),
+    request<{ rapat: RapatDetail[] }>("/rapat"),
 
   createMeeting: (data: {
-    title: string;
-    schedule: string;
     division_id?: number;
-    proker_id?: number;
+    judul: string;
+    tanggal: string;
+    lokasi: string;
+    agenda: string;
   }) =>
-    request<unknown>("/meeting", {
+    request<RapatDetail>("/rapat", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
-  getAttendance: (meeting_id: number) =>
-    request<{
-      attendance: {
-        id: number;
-        meeting_id: number;
-        user_nis: string;
-        status: string;
-      }[];
-    }>(`/meeting/${meeting_id}/attendance`),
+  getMeeting: (id: number) =>
+    request<RapatDetail>(`/rapat/${id}`),
 
-  recordAttendance: (meeting_id: number, data: { entries: { user_nis: string; status: string }[] }) =>
-    request<{ message: string }>(`/meeting/${meeting_id}/attendance`, {
+  updateStatusRapat: (id: number, status: string) =>
+    request<{ message: string }>(`/rapat/${id}/status`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    }),
+
+  upsertNotulensi: (id: number, isi: string) =>
+    request<NotulensiDetail>(`/rapat/${id}/notulensi`, {
+      method: "PUT",
+      body: JSON.stringify({ isi }),
+    }),
+
+  finalisasiNotulensi: (id: number) =>
+    request<NotulensiDetail>(`/rapat/${id}/notulensi/finalisasi`, {
+      method: "POST",
+    }),
+
+  getNotulensi: (id: number) =>
+    request<NotulensiDetail>(`/rapat/${id}/notulensi`),
+
+  scanPresensi: (data: {
+    qr_token: string;
+    acara_id: number;
+    foto_url?: string;
+    tipe: string; // 'Hadir', 'Izin', 'Sakit'
+    keterangan?: string;
+    bukti_url?: string;
+  }) =>
+    request<PresensiDetail>("/presensi/scan", {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  listPresensiRapat: (id: number) =>
+    request<ListPresensiResponse>(`/rapat/${id}/presensi`),
+
+  verifikasiPresensi: (id: number, status_verifikasi: string, catatan?: string) =>
+    request<PresensiDetail>(`/presensi/${id}/verifikasi`, {
+      method: "POST",
+      body: JSON.stringify({ status_verifikasi, catatan }),
+    }),
+
+  listPresensiMenunggu: () =>
+    request<ListPresensiResponse>("/presensi/menunggu"),
 
   // Assets
   listAssets: () =>
-    request<{
-      assets: {
-        id: number;
-        name: string;
-        description: string;
-        status: string;
-        created_at: string;
-      }[];
-    }>("/assets"),
+    request<{ assets: AssetDetail[] }>("/assets"),
 
-  bookAsset: (data: {
-    asset_id: number;
-    start_time: string;
-    end_time: string;
-    proker_id?: number;
-  }) =>
-    request<unknown>("/asset/book", {
+  getAsset: (id: number) =>
+    request<AssetDetail>(`/asset/${id}`),
+
+  createAsset: (data: { nama: string; description: string }) =>
+    request<AssetDetail>("/asset", {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  updateAssetStatus: (id: number, status: string) =>
+    request<{ message: string }>(`/asset/${id}/status`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
+    }),
+
+  bookAsset: (data: {
+    asset_id: number;
+    proker_id?: number;
+    waktu_mulai: string;
+    waktu_selesai: string;
+    keterangan: string;
+  }) =>
+    request<PeminjamanDetail>("/asset/pinjam", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listBookings: (id: number) =>
+    request<ListPeminjamanResponse>(`/asset/${id}/peminjaman`),
 
   // Public
   listEvents: () =>
@@ -287,27 +621,17 @@ export const api = {
 
   // Handover
   listHandovers: () =>
-    request<{
-      handovers: {
-        id: number;
-        period: string;
-        final_balance: number;
-        unfinished_proker: unknown[];
-        vendor_contacts: unknown[];
-        signature_old_ketua: string;
-        signature_new_ketua: string;
-        signature_pembina: string;
-        created_at: string;
-      }[];
-    }>("/handovers"),
+    request<{ handovers: HandoverDetail[] }>("/handovers"),
 
   createHandover: (data: {
-    period: string;
-    final_balance: number;
-    unfinished_proker: any[];
-    vendor_contacts: any[];
+    periode_lama: string;
+    periode_baru: string;
+    saldo_akhir: number;
+    proker_belum_selesai: any[];
+    kontak_vendor: any[];
+    catatan: string;
   }) =>
-    request<unknown>("/handover", {
+    request<HandoverDetail>("/handover", {
       method: "POST",
       body: JSON.stringify(data),
     }),
@@ -349,4 +673,14 @@ export const api = {
 
   getB10Words: () => request<{ words: any[] }>("/special/b10"),
   createB10Word: (data: any) => request<any>("/special/b10", { method: "POST", body: JSON.stringify(data) }),
+
+  // Announcements (Wrapper ke meeting.ListPengumuman / meeting.BuatPengumuman)
+  getAnnouncements: () =>
+    request<{ pengumuman: PengumumanDetail[] }>("/pengumuman"),
+
+  createAnnouncement: (data: { judul: string; isi: string; target: string; division_id?: number }) =>
+    request<PengumumanDetail>("/pengumuman", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };

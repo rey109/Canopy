@@ -1,5 +1,3 @@
-CREATE TYPE attendance_status AS ENUM ('hadir', 'izin', 'alfa');
-
-ALTER TABLE attendance ALTER COLUMN status DROP DEFAULT;
-ALTER TABLE attendance ALTER COLUMN status TYPE attendance_status USING status::attendance_status;
-ALTER TABLE attendance ALTER COLUMN status SET DEFAULT 'alfa'::attendance_status;
+-- Migration ini sudah tidak relelan setelah redesign schema.
+-- Status rapat sekarang menggunakan VARCHAR dengan CHECK constraint di migration 2_add_constraints.
+-- File ini dikosongkan agar urutan migrasi Encore tidak berubah.

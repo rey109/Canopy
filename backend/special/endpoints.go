@@ -18,15 +18,15 @@ type MessageResponse struct {
 }
 
 func checkPermission(userData *user.UserData, targetDivisionID int) error {
-	if userData.Role == "Trimitra" || userData.Role == "Pembina" {
+	if userData.GroupName == "Trimitra" || userData.GroupName == "Pembina" {
 		return nil
 	}
-	if userData.Role == "Ketua Bidang" && userData.DivisionID != nil && *userData.DivisionID == targetDivisionID {
+	if userData.GroupName == "Kepala Divisi" && userData.DivisionID != nil && *userData.DivisionID == targetDivisionID {
 		return nil
 	}
 	return &errs.Error{
 		Code:    errs.PermissionDenied,
-		Message: "you do not have permission to manage this division's special module",
+		Message: "kamu tidak memiliki wewenang untuk mengelola modul khusus divisi ini",
 	}
 }
 

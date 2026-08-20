@@ -1,3 +1,3 @@
-CREATE TYPE transaction_type AS ENUM ('debit', 'credit');
-
-ALTER TABLE transactions ALTER COLUMN type TYPE transaction_type USING type::transaction_type;
+-- Migration ini sudah tidak relelan setelah redesign schema.
+-- Tipe transaksi sekarang menggunakan VARCHAR 'Masuk'/'Keluar' dengan CHECK constraint.
+-- File ini dikosongkan agar urutan migrasi Encore tidak berubah.

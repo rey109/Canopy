@@ -1,72 +1,89 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, type RapatDetail, type UserDetail, type DivisionDetail, type ProkerDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-
-interface Meeting {
-  id: number;
-  title: string;
-  schedule: string;
-  division_id: number | null;
-  proker_id: number | null;
-  minutes: string;
-  qc_status: string;
-  created_by: string;
-}
 
 interface AttendanceEntry {
   user_nis: string;
-  status: string;
+  user_nama: string;
+  status: string; // 'hadir', 'izin', 'sakit', 'alfa'
 }
 
 export default function MeetingsPage() {
   const { user } = useAuth();
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [meetings, setMeetings] = useState<RapatDetail[]>([]);
+  const [divisions, setDivisions] = useState<DivisionDetail[]>([]);
+  const [prokers, setProkers] = useState<ProkerDetail[]>([]);
+  const [userList, setUserList] = useState<UserDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Filter list
+  const [filterStatus, setFilterStatus] = useState<"Semua" | "Terjadwal" | "Berlangsung" | "Selesai">("Semua");
+
   // Form State for creating meeting
-  const [title, setTitle] = useState("");
-  const [schedule, setSchedule] = useState("");
+  const [judul, setJudul] = useState("");
+  const [tanggal, setTanggal] = useState("");
+  const [lokasi, setLokasi] = useState("");
+  const [agenda, setAgenda] = useState("");
   const [divisionId, setDivisionId] = useState("");
-  const [prokerId, setProkerId] = useState("");
 
   // Attendance management state
-  const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+  const [selectedMeeting, setSelectedMeeting] = useState<RapatDetail | null>(null);
   const [attendanceList, setAttendanceList] = useState<AttendanceEntry[]>([]);
   const [savingAttendance, setSavingAttendance] = useState(false);
 
-  const fetchMeetings = () => {
+  // Notulensi state
+  const [notulensiMeeting, setNotulensiMeeting] = useState<RapatDetail | null>(null);
+  const [notulensiIsi, setNotulensiIsi] = useState("");
+  const [notulensiStatus, setNotulensiStatus] = useState("Draft");
+  const [savingNotulensi, setSavingNotulensi] = useState(false);
+
+  const fetchMeetingsData = async () => {
     setLoading(true);
-    api
-      .listMeetings()
-      .then((res) => setMeetings(res.meetings || []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    try {
+      const [mRes, dRes, pRes, uRes] = await Promise.allSettled([
+        api.listMeetings(),
+        api.listDivisions(),
+        api.listProkers(),
+        api.listUsers(),
+      ]);
+
+      if (mRes.status === "fulfilled") setMeetings(mRes.value.rapat || []);
+      if (dRes.status === "fulfilled") setDivisions(dRes.value.divisions || []);
+      if (pRes.status === "fulfilled") setProkers(pRes.value.prokers || []);
+      if (uRes.status === "fulfilled") setUserList(uRes.value.users || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    fetchMeetings();
-  }, []);
+    fetchMeetingsData();
+  }, [user]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
       await api.createMeeting({
-        title,
-        schedule: new Date(schedule).toISOString(),
+        judul,
+        tanggal: new Date(tanggal).toISOString(),
+        lokasi,
+        agenda,
         division_id: divisionId ? Number(divisionId) : undefined,
-        proker_id: prokerId ? Number(prokerId) : undefined,
       });
       setShowModal(false);
-      setTitle("");
-      setSchedule("");
+      setJudul("");
+      setTanggal("");
+      setLokasi("");
+      setAgenda("");
       setDivisionId("");
-      setProkerId("");
-      fetchMeetings();
+      fetchMeetingsData();
     } catch (err: any) {
       alert("Gagal menjadwalkan rapat: " + err.message);
     } finally {
@@ -74,26 +91,25 @@ export default function MeetingsPage() {
     }
   };
 
-  const handleOpenAttendance = async (m: Meeting) => {
+  const handleOpenAttendance = async (m: RapatDetail) => {
     setSelectedMeeting(m);
     setAttendanceList([]);
     try {
-      // Fetch users list
-      const uRes = await api.listUsers();
-      // Fetch current attendance list
-      const aRes = await api.getAttendance(m.id).catch(() => ({ attendance: [] }));
+      const aRes = await api.listPresensiRapat(m.rapat_id).catch(() => ({ presensi: [] }));
+      const current = aRes.presensi || [];
 
-      const current = aRes.attendance || [];
-      const populated = (uRes.users || []).map((usr) => {
-        const att = current.find((a: any) => a.user_nis === usr.nis);
+      // Populasikan semua user aktif dengan status kehadiran (default 'Alpa')
+      const populated = userList.map((u) => {
+        const att = current.find((a) => a.nis === u.nis);
         return {
-          user_nis: usr.nis,
-          status: att ? att.status : "alfa",
+          user_nis: u.nis,
+          user_nama: u.nama,
+          status: att ? att.tipe.toLowerCase() : "alfa",
         };
       });
       setAttendanceList(populated);
     } catch {
-      alert("Gagal mengambil data absensi.");
+      alert("Gagal mengambil data kehadiran.");
     }
   };
 
@@ -103,13 +119,13 @@ export default function MeetingsPage() {
     try {
       const entries = attendanceList.map((a) => ({
         user_nis: a.user_nis,
-        status: a.status,
+        status: a.status === "hadir" ? "hadir" : a.status === "izin" ? "izin" : "alfa",
       }));
-      await api.recordAttendance(selectedMeeting.id, { entries });
-      alert("Kehadiran rapat berhasil disimpan!");
+      await api.recordAttendance(selectedMeeting.rapat_id, { entries });
+      alert("Absensi rapat berhasil disimpan!");
       setSelectedMeeting(null);
     } catch (err: any) {
-      alert("Gagal menyimpan kehadiran: " + err.message);
+      alert("Gagal menyimpan absensi: " + err.message);
     } finally {
       setSavingAttendance(false);
     }
@@ -121,16 +137,65 @@ export default function MeetingsPage() {
     );
   };
 
+  // Notulensi Handlers
+  const handleOpenNotulensi = async (m: RapatDetail) => {
+    setNotulensiMeeting(m);
+    setNotulensiIsi("");
+    setNotulensiStatus("Draft");
+    try {
+      const res = await api.getNotulensi(m.rapat_id);
+      setNotulensiIsi(res.isi);
+      setNotulensiStatus(res.status);
+    } catch {
+      // Notulensi belum dibuat, biarkan kosong
+    }
+  };
+
+  const handleSaveNotulensi = async () => {
+    if (!notulensiMeeting) return;
+    setSavingNotulensi(true);
+    try {
+      await api.upsertNotulensi(notulensiMeeting.rapat_id, notulensiIsi);
+      alert("Notulensi berhasil disimpan sebagai Draft!");
+      setNotulensiMeeting(null);
+    } catch (err: any) {
+      alert("Gagal menyimpan notulensi: " + err.message);
+    } finally {
+      setSavingNotulensi(false);
+    }
+  };
+
+  const handleFinalisasiNotulensi = async () => {
+    if (!notulensiMeeting) return;
+    setSavingNotulensi(true);
+    try {
+      await api.finalisasiNotulensi(notulensiMeeting.rapat_id);
+      alert("Notulensi berhasil difinalisasi!");
+      setNotulensiMeeting(null);
+    } catch (err: any) {
+      alert("Gagal finalisasi notulensi: " + err.message);
+    } finally {
+      setSavingNotulensi(false);
+    }
+  };
+
+  const isStaf = user?.group_name === "Staf";
+
+  const filteredMeetings = meetings.filter((m) => {
+    if (filterStatus === "Semua") return true;
+    return m.status === filterStatus;
+  });
+
   return (
-    <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-6">
+    <div className="animate-fade-in space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Rapat & Kegiatan</h1>
           <p className="text-[var(--text-secondary)] text-sm mt-1">
             Jadwalkan rapat divisi atau organisasi, rekam notulensi, dan catat kehadiran
           </p>
         </div>
-        {user?.role !== "Anggota" && (
+        {!isStaf && (
           <button onClick={() => setShowModal(true)} className="btn-primary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" />
@@ -139,6 +204,23 @@ export default function MeetingsPage() {
             Jadwalkan Rapat
           </button>
         )}
+      </div>
+
+      {/* Filter Rapat */}
+      <div className="flex border-b border-[var(--border)]">
+        {(["Semua", "Terjadwal", "Berlangsung", "Selesai"] as const).map((status) => (
+          <button
+            key={status}
+            onClick={() => setFilterStatus(status)}
+            className={`px-4 py-2 border-b-2 text-sm font-medium transition-all ${
+              filterStatus === status
+                ? "border-[var(--accent)] text-[var(--accent)]"
+                : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+            }`}
+          >
+            {status}
+          </button>
+        ))}
       </div>
 
       {loading ? (
@@ -150,39 +232,47 @@ export default function MeetingsPage() {
             </div>
           ))}
         </div>
-      ) : meetings.length === 0 ? (
-        <div className="glass-card p-12 text-center">
-          <p className="text-[var(--text-muted)]">Belum ada rapat terdaftar.</p>
+      ) : filteredMeetings.length === 0 ? (
+        <div className="glass-card p-12 text-center text-[var(--text-muted)]">
+          Belum ada rapat dengan status ini.
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 stagger-children">
-          {meetings.map((m) => (
-            <div key={m.id} className="glass-card p-5 flex flex-col justify-between hover:translate-y-[-1px] transition-all">
+          {filteredMeetings.map((m) => (
+            <div key={m.rapat_id} className="glass-card p-5 flex flex-col justify-between hover:translate-y-[-1px] transition-all">
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <span className={`badge ${m.qc_status === "Approved" ? "badge-success" : "badge-warning"}`}>
-                    QC: {m.qc_status}
+                  <span className={`badge ${m.status === "Selesai" ? "badge-success" : m.status === "Berlangsung" ? "badge-info" : "badge-neutral"}`}>
+                    {m.status}
                   </span>
                   <span className="text-xs text-[var(--text-muted)]">
-                    {new Date(m.schedule).toLocaleString("id-ID", {
+                    {new Date(m.tanggal).toLocaleString("id-ID", {
                       dateStyle: "medium",
                       timeStyle: "short",
                     })}
                   </span>
                 </div>
-                <h3 className="font-semibold text-lg mb-2">{m.title}</h3>
-                <p className="text-sm text-[var(--text-secondary)] line-clamp-3 mb-4">
-                  {m.minutes || "Notulensi rapat belum ditulis."}
-                </p>
+                <h3 className="font-semibold text-lg mb-2">{m.judul}</h3>
+                <p className="text-xs text-[var(--text-secondary)] mb-2">📍 Lokasi: {m.lokasi || "—"}</p>
+                <p className="text-xs text-[var(--text-muted)] mb-4">Agenda: {m.agenda || "—"}</p>
+
+                {m.qr_code && (
+                  <div className="p-3 bg-[var(--bg-primary)] rounded border border-[var(--border)] mb-4">
+                    <p className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">QR Code Token (Pajang di Proyektor)</p>
+                    <p className="text-sm font-mono font-bold text-[var(--accent)] select-all mt-1">{m.qr_code}</p>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between border-t border-[var(--border)] pt-4 mt-auto">
-                <span className="text-xs text-[var(--text-muted)]">Oleh: {m.created_by}</span>
+                <span className="text-xs text-[var(--text-muted)]">Dibuat: {m.dibuat_oleh}</span>
                 <div className="flex gap-2">
                   <button onClick={() => handleOpenAttendance(m)} className="btn-secondary text-xs py-1.5 px-3">
-                    Kehadiran
+                    Absensi
                   </button>
-                  <button className="btn-primary text-xs py-1.5 px-3">Notulensi</button>
+                  <button onClick={() => handleOpenNotulensi(m)} className="btn-primary text-xs py-1.5 px-3">
+                    Notulensi
+                  </button>
                 </div>
               </div>
             </div>
@@ -195,7 +285,7 @@ export default function MeetingsPage() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="glass-card p-6 w-full max-w-lg space-y-4 max-h-[85vh] flex flex-col">
             <h3 className="text-lg font-semibold border-b border-[var(--border)] pb-2 flex-shrink-0">
-              📋 Kehadiran: {selectedMeeting.title}
+              📋 Absensi: {selectedMeeting.judul}
             </h3>
             <div className="flex-1 overflow-y-auto space-y-2 pr-1">
               {attendanceList.length === 0 ? (
@@ -203,13 +293,16 @@ export default function MeetingsPage() {
               ) : (
                 attendanceList.map((a) => (
                   <div key={a.user_nis} className="p-3 rounded-lg border border-[var(--border)] flex items-center justify-between bg-[var(--bg-primary)]">
-                    <span className="text-xs font-medium text-[var(--text-secondary)]">NIS: {a.user_nis}</span>
-                    <div className="flex gap-1.5">
-                      {["hadir", "izin", "alfa"].map((status) => (
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{a.user_nama}</p>
+                      <p className="text-[10px] text-[var(--text-muted)]">NIS: {a.user_nis}</p>
+                    </div>
+                    <div className="flex gap-1">
+                      {["hadir", "izin", "sakit", "alfa"].map((status) => (
                         <button
                           key={status}
                           onClick={() => updateAttendanceStatus(a.user_nis, status)}
-                          className={`text-[10px] py-1 px-2.5 font-bold rounded-lg border capitalize transition-all ${
+                          className={`text-[9px] py-1 px-2 font-bold rounded-lg border capitalize transition-all ${
                             a.status === status
                               ? "bg-[var(--accent)] text-white border-[var(--accent)]"
                               : "border-[var(--border)] text-[var(--text-muted)] hover:text-white"
@@ -235,6 +328,47 @@ export default function MeetingsPage() {
         </div>
       )}
 
+      {/* Notulensi Modal */}
+      {notulensiMeeting !== null && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="glass-card p-6 w-full max-w-lg space-y-4 max-h-[85vh] flex flex-col">
+            <h3 className="text-lg font-semibold border-b border-[var(--border)] pb-2 flex-shrink-0 flex items-center justify-between">
+              <span>✍️ Notulensi Rapat</span>
+              <span className={`badge ${notulensiStatus === "Final" ? "badge-success" : "badge-warning"} text-xs`}>
+                Status: {notulensiStatus}
+              </span>
+            </h3>
+            <div className="flex-1 overflow-y-auto space-y-3">
+              <p className="text-sm font-medium">{notulensiMeeting.judul}</p>
+              <textarea
+                rows={10}
+                value={notulensiIsi}
+                onChange={(e) => setNotulensiIsi(e.target.value)}
+                disabled={notulensiStatus === "Final" || isStaf}
+                className="input-field text-sm resize-none font-mono"
+                placeholder="Tulis ringkasan hasil rapat di sini..."
+                required
+              ></textarea>
+            </div>
+            <div className="flex justify-end gap-2 pt-4 border-t border-[var(--border)] flex-shrink-0">
+              <button onClick={() => setNotulensiMeeting(null)} className="btn-secondary text-xs">Tutup</button>
+              {notulensiStatus !== "Final" && !isStaf && (
+                <>
+                  <button onClick={handleSaveNotulensi} disabled={savingNotulensi} className="btn-secondary text-xs">
+                    Simpan Draft
+                  </button>
+                  {user?.group_name === "Sekretaris" && user?.level === 1 && (
+                    <button onClick={handleFinalisasiNotulensi} disabled={savingNotulensi} className="btn-primary text-xs">
+                      Finalisasi (QC)
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Schedule Meeting Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -245,8 +379,8 @@ export default function MeetingsPage() {
                 <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Judul Rapat</label>
                 <input
                   type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
+                  value={judul}
+                  onChange={(e) => setJudul(e.target.value)}
                   placeholder="Contoh: Rapat Koordinasi Program Kerja Bidang 9"
                   className="input-field"
                   required
@@ -254,36 +388,52 @@ export default function MeetingsPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Tanggal & Waktu</label>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Lokasi</label>
                 <input
-                  type="datetime-local"
-                  value={schedule}
-                  onChange={(e) => setSchedule(e.target.value)}
+                  type="text"
+                  value={lokasi}
+                  onChange={(e) => setLokasi(e.target.value)}
+                  placeholder="Contoh: Ruang OSIS atau Lapangan Basket"
                   className="input-field"
                   required
                 />
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Agenda Pembahasan</label>
+                <textarea
+                  rows={2}
+                  value={agenda}
+                  onChange={(e) => setAgenda(e.target.value)}
+                  placeholder="Contoh: Pemilihan panitia classmeeting"
+                  className="input-field resize-none"
+                  required
+                ></textarea>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">ID Divisi (Opsional)</label>
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Tanggal & Waktu</label>
                   <input
-                    type="number"
-                    value={divisionId}
-                    onChange={(e) => setDivisionId(e.target.value)}
-                    placeholder="Contoh: 9"
+                    type="datetime-local"
+                    value={tanggal}
+                    onChange={(e) => setTanggal(e.target.value)}
                     className="input-field"
+                    required
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">ID Proker (Opsional)</label>
-                  <input
-                    type="number"
-                    value={prokerId}
-                    onChange={(e) => setProkerId(e.target.value)}
-                    placeholder="Contoh: 1"
-                    className="input-field"
-                  />
+                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Divisi (Opsional)</label>
+                  <select
+                    value={divisionId}
+                    onChange={(e) => setDivisionId(e.target.value)}
+                    className="input-field bg-[var(--bg-primary)]"
+                  >
+                    <option value="">Organisasi (Semua)</option>
+                    {divisions.map((d) => (
+                      <option key={d.division_id} value={d.division_id}>{d.division_name}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

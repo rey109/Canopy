@@ -2,7 +2,9 @@ package meeting
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"time"
 
@@ -15,239 +17,679 @@ import (
 
 var db = sqldb.Named("meeting")
 
-type MeetingDetail struct {
-	ID         int       `json:"id"`
-	Title      string    `json:"title"`
-	Schedule   time.Time `json:"schedule"`
+// ============================================================
+// RAPAT
+// ============================================================
+
+type RapatDetail struct {
+	RapatID    int        `json:"rapat_id"`
+	PeriodeID  int        `json:"periode_id"`
+	DivisionID *int       `json:"division_id"`
+	Judul      string     `json:"judul"`
+	Tanggal    time.Time  `json:"tanggal"`
+	Lokasi     string     `json:"lokasi"`
+	Agenda     string     `json:"agenda"`
+	DibuatOleh string     `json:"dibuat_oleh"`
+	Status     string     `json:"status"`
+	QRCode     *string    `json:"qr_code,omitempty"` // hanya ditampilkan ke pembuat rapat
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+type CreateRapatParams struct {
 	DivisionID *int      `json:"division_id"`
-	ProkerID   *int      `json:"proker_id"`
-	Minutes    string    `json:"minutes"`
-	QCStatus   string    `json:"qc_status"`
-	CreatedBy  string    `json:"created_by"`
-	CreatedAt  time.Time `json:"created_at"`
+	Judul      string    `json:"judul"`
+	Tanggal    time.Time `json:"tanggal"`
+	Lokasi     string    `json:"lokasi"`
+	Agenda     string    `json:"agenda"`
 }
 
-type CreateParams struct {
-	Title      string    `json:"title"`
-	Schedule   time.Time `json:"schedule"`
-	DivisionID *int      `json:"division_id"`
-	ProkerID   *int      `json:"proker_id"`
-}
-
-type ListResponse struct {
-	Meetings []MeetingDetail `json:"meetings"`
-}
-
-type UpdateMinutesParams struct {
-	Minutes string `json:"minutes"`
-}
-
-type AttendanceEntry struct {
-	UserNIS string `json:"user_nis"`
-	Status  string `json:"status"` // 'hadir', 'izin', 'alfa'
-}
-
-type RecordAttendanceParams struct {
-	Entries []AttendanceEntry `json:"entries"`
-}
-
-type AttendanceDetail struct {
-	ID        int    `json:"id"`
-	MeetingID int    `json:"meeting_id"`
-	UserNIS   string `json:"user_nis"`
-	Status    string `json:"status"`
-}
-
-type AttendanceListResponse struct {
-	Attendance []AttendanceDetail `json:"attendance"`
+type ListRapatResponse struct {
+	Rapat []RapatDetail `json:"rapat"`
 }
 
 type MessageResponse struct {
 	Message string `json:"message"`
 }
 
-//encore:api auth path=/meeting method=POST
-func Create(ctx context.Context, params *CreateParams) (*MeetingDetail, error) {
+//encore:api auth path=/rapat method=POST
+func BuatRapat(ctx context.Context, params *CreateRapatParams) (*RapatDetail, error) {
 	nis, _ := auth.UserID()
-	userData := auth.Data().(*user.UserData)
+	ud := auth.Data().(*user.UserData)
 
-	if userData.Role == "Anggota" {
+	if ud.GroupName == "Staf" {
 		return nil, &errs.Error{
 			Code:    errs.PermissionDenied,
-			Message: "only Ketua Bidang, Trimitra, Sekretariat, or Pembina can schedule meetings",
+			Message: "hanya Kepala Divisi, Sekretaris, Trimitra, atau Pembina yang dapat membuat rapat",
 		}
 	}
-
-	if userData.Role == "Ketua Bidang" {
-		if params.DivisionID == nil || userData.DivisionID == nil || *params.DivisionID != *userData.DivisionID {
+	if ud.GroupName == "Kepala Divisi" {
+		if params.DivisionID == nil || ud.DivisionID == nil || *params.DivisionID != *ud.DivisionID {
 			return nil, &errs.Error{
 				Code:    errs.PermissionDenied,
-				Message: "you can only schedule meetings for your own division",
+				Message: "Kepala Divisi hanya dapat membuat rapat untuk divisinya sendiri",
 			}
 		}
 	}
 
-	var divID, prokID sql.NullInt32
+	// Generate QR code token unik
+	qrBytes := make([]byte, 16)
+	if _, err := rand.Read(qrBytes); err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: "gagal generate QR token"}
+	}
+	qrToken := hex.EncodeToString(qrBytes)
+
+	var divID sql.NullInt32
 	if params.DivisionID != nil {
 		divID.Valid = true
 		divID.Int32 = int32(*params.DivisionID)
 	}
-	if params.ProkerID != nil {
-		prokID.Valid = true
-		prokID.Int32 = int32(*params.ProkerID)
-	}
 
-	var m MeetingDetail
-	var dID, pID sql.NullInt32
+	var r RapatDetail
+	var retDivID sql.NullInt32
+	var retQR sql.NullString
 	err := db.QueryRow(ctx, `
-		INSERT INTO meetings (title, schedule, division_id, proker_id, created_by)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, title, schedule, division_id, proker_id, minutes, qc_status, created_by, created_at
-	`, params.Title, params.Schedule, divID, prokID, string(nis)).
-		Scan(&m.ID, &m.Title, &m.Schedule, &dID, &pID, &m.Minutes, &m.QCStatus, &m.CreatedBy, &m.CreatedAt)
+		INSERT INTO rapat
+			(periode_id, division_id, judul, tanggal, lokasi, agenda, dibuat_oleh, status, qr_code)
+		VALUES (
+			(SELECT periode_id FROM periode WHERE is_aktif = TRUE LIMIT 1),
+			$1, $2, $3, $4, $5, $6, 'Terjadwal', $7
+		)
+		RETURNING rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
+		          dibuat_oleh, status, qr_code, created_at
+	`, divID, params.Judul, params.Tanggal, params.Lokasi, params.Agenda, string(nis), qrToken).
+		Scan(
+			&r.RapatID, &r.PeriodeID, &retDivID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
+			&r.DibuatOleh, &r.Status, &retQR, &r.CreatedAt,
+		)
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}
-	if dID.Valid {
-		v := int(dID.Int32)
-		m.DivisionID = &v
+	if retDivID.Valid {
+		v := int(retDivID.Int32)
+		r.DivisionID = &v
 	}
-	if pID.Valid {
-		v := int(pID.Int32)
-		m.ProkerID = &v
+	if retQR.Valid {
+		r.QRCode = &retQR.String
 	}
-	return &m, nil
+	return &r, nil
 }
 
-//encore:api auth path=/meetings method=GET
-func List(ctx context.Context) (*ListResponse, error) {
-	rows, err := db.Query(ctx, `
-		SELECT id, title, schedule, division_id, proker_id, minutes, qc_status, created_by, created_at
-		FROM meetings ORDER BY schedule DESC
-	`)
+//encore:api auth path=/rapat method=GET
+func ListRapat(ctx context.Context) (*ListRapatResponse, error) {
+	ud := auth.Data().(*user.UserData)
+	nisStr, _ := auth.UserID()
+
+	var rows *sqldb.Rows
+	var err error
+
+	// Trimitra/Sekretaris Umum lihat semua; lainnya hanya rapat divisinya + rapat org
+	if ud.HasScopeAll() {
+		rows, err = db.Query(ctx, `
+			SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
+			       dibuat_oleh, status, NULL AS qr_code, created_at
+			FROM rapat ORDER BY tanggal DESC
+		`)
+	} else {
+		rows, err = db.Query(ctx, `
+			SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
+			       dibuat_oleh, status,
+			       CASE WHEN dibuat_oleh = $1 THEN qr_code ELSE NULL END AS qr_code,
+			       created_at
+			FROM rapat
+			WHERE division_id IS NULL OR division_id = $2
+			ORDER BY tanggal DESC
+		`, string(nisStr), ud.DivisionID)
+	}
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}
 	defer rows.Close()
 
-	var meetings []MeetingDetail
+	var list []RapatDetail
 	for rows.Next() {
-		var m MeetingDetail
-		var dID, pID sql.NullInt32
-		err := rows.Scan(&m.ID, &m.Title, &m.Schedule, &dID, &pID, &m.Minutes, &m.QCStatus, &m.CreatedBy, &m.CreatedAt)
+		r, err := scanRapat(rows)
 		if err != nil {
 			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 		}
-		if dID.Valid {
-			v := int(dID.Int32)
-			m.DivisionID = &v
-		}
-		if pID.Valid {
-			v := int(pID.Int32)
-			m.ProkerID = &v
-		}
-		meetings = append(meetings, m)
+		list = append(list, *r)
 	}
-	return &ListResponse{Meetings: meetings}, nil
+	return &ListRapatResponse{Rapat: list}, nil
 }
 
-//encore:api auth path=/meeting/:id method=GET
-func Get(ctx context.Context, id int) (*MeetingDetail, error) {
-	var m MeetingDetail
-	var dID, pID sql.NullInt32
-	err := db.QueryRow(ctx, `
-		SELECT id, title, schedule, division_id, proker_id, minutes, qc_status, created_by, created_at
-		FROM meetings WHERE id = $1
-	`, id).Scan(&m.ID, &m.Title, &m.Schedule, &dID, &pID, &m.Minutes, &m.QCStatus, &m.CreatedBy, &m.CreatedAt)
+//encore:api auth path=/rapat/:id method=GET
+func GetRapat(ctx context.Context, id int) (*RapatDetail, error) {
+	nisStr, _ := auth.UserID()
+
+	row := db.QueryRow(ctx, `
+		SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
+		       dibuat_oleh, status,
+		       CASE WHEN dibuat_oleh = $1 THEN qr_code ELSE NULL END AS qr_code,
+		       created_at
+		FROM rapat WHERE rapat_id = $2
+	`, string(nisStr), id)
+	r, err := scanRapat(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, &errs.Error{Code: errs.NotFound, Message: "meeting not found"}
+			return nil, &errs.Error{Code: errs.NotFound, Message: "rapat tidak ditemukan"}
 		}
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}
-	if dID.Valid {
-		v := int(dID.Int32)
-		m.DivisionID = &v
-	}
-	if pID.Valid {
-		v := int(pID.Int32)
-		m.ProkerID = &v
-	}
-	return &m, nil
+	return r, nil
 }
 
-//encore:api auth path=/meeting/:id/minutes method=PUT
-func UpdateMinutes(ctx context.Context, id int, params *UpdateMinutesParams) (*MessageResponse, error) {
-	res, err := db.Exec(ctx, "UPDATE meetings SET minutes = $1 WHERE id = $2", params.Minutes, id)
+type UpdateStatusRapatParams struct {
+	Status string `json:"status"`
+}
+
+//encore:api auth path=/rapat/:id/status method=PUT
+func UpdateStatusRapat(ctx context.Context, id int, params *UpdateStatusRapatParams) (*MessageResponse, error) {
+	nisStr, _ := auth.UserID()
+	valid := map[string]bool{"Terjadwal": true, "Berlangsung": true, "Selesai": true}
+	if !valid[params.Status] {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "status tidak valid"}
+	}
+
+	res, err := db.Exec(ctx, `
+		UPDATE rapat SET status = $1 WHERE rapat_id = $2 AND dibuat_oleh = $3
+	`, params.Status, id, string(nisStr))
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}
-	rows := res.RowsAffected()
-	if rows == 0 {
-		return nil, &errs.Error{Code: errs.NotFound, Message: "meeting not found"}
+	if res.RowsAffected() == 0 {
+		return nil, &errs.Error{Code: errs.NotFound, Message: "rapat tidak ditemukan atau bukan milikmu"}
 	}
-	return &MessageResponse{Message: "Minutes updated"}, nil
+	return &MessageResponse{Message: "Status rapat diperbarui"}, nil
 }
 
-//encore:api auth path=/meeting/:id/qc-approve method=POST
-func QCApprove(ctx context.Context, id int) (*MessageResponse, error) {
-	userData := auth.Data().(*user.UserData)
-	if userData.Role != "Sekretariat" && userData.Role != "Trimitra" && userData.Role != "Pembina" {
+// ============================================================
+// NOTULENSI
+// ============================================================
+
+type NotulensiDetail struct {
+	NotulensiID      int        `json:"notulensi_id"`
+	RapatID          int        `json:"rapat_id"`
+	Isi              string     `json:"isi"`
+	DifinalisasiOleh *string    `json:"difinalisasi_oleh"`
+	Status           string     `json:"status"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+type UpsertNotulensiParams struct {
+	Isi string `json:"isi"`
+}
+
+type FinalisasiNotulensiParams struct {
+	Finalisasi bool `json:"finalisasi"`
+}
+
+//encore:api auth path=/rapat/:id/notulensi method=PUT
+func UpsertNotulensi(ctx context.Context, id int, params *UpsertNotulensiParams) (*NotulensiDetail, error) {
+	ud := auth.Data().(*user.UserData)
+	if ud.GroupName != "Sekretaris" && ud.GroupName != "Trimitra" {
 		return nil, &errs.Error{
 			Code:    errs.PermissionDenied,
-			Message: "only Sekretariat, Trimitra, or Pembina can QC approve minutes",
+			Message: "hanya Sekretaris atau Trimitra yang dapat mengisi notulensi",
 		}
 	}
-	res, err := db.Exec(ctx, "UPDATE meetings SET qc_status = 'Approved' WHERE id = $1 AND qc_status = 'Pending'", id)
+
+	var n NotulensiDetail
+	var retFinalisasi sql.NullString
+	err := db.QueryRow(ctx, `
+		INSERT INTO notulensi (rapat_id, isi, status)
+		VALUES ($1, $2, 'Draft')
+		ON CONFLICT (rapat_id) DO UPDATE SET isi = $2, updated_at = NOW()
+		RETURNING notulensi_id, rapat_id, isi, difinalisasi_oleh, status, updated_at
+	`, id, params.Isi).
+		Scan(&n.NotulensiID, &n.RapatID, &n.Isi, &retFinalisasi, &n.Status, &n.UpdatedAt)
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}
-	rows := res.RowsAffected()
-	if rows == 0 {
-		return nil, &errs.Error{Code: errs.NotFound, Message: "meeting not found or already approved"}
+	if retFinalisasi.Valid {
+		n.DifinalisasiOleh = &retFinalisasi.String
 	}
-	return &MessageResponse{Message: "Minutes QC approved"}, nil
+	return &n, nil
 }
 
-//encore:api auth path=/meeting/:id/attendance method=POST
-func RecordAttendance(ctx context.Context, id int, params *RecordAttendanceParams) (*MessageResponse, error) {
-	for _, e := range params.Entries {
-		if e.Status != "hadir" && e.Status != "izin" && e.Status != "alfa" {
-			return nil, &errs.Error{
-				Code:    errs.InvalidArgument,
-				Message: "status must be 'hadir', 'izin', or 'alfa' for " + e.UserNIS,
-			}
-		}
-		_, err := db.Exec(ctx, `
-			INSERT INTO attendance (meeting_id, user_nis, status)
-			VALUES ($1, $2, $3)
-			ON CONFLICT (meeting_id, user_nis) DO UPDATE SET status = $3
-		`, id, e.UserNIS, e.Status)
-		if err != nil {
-			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+//encore:api auth path=/rapat/:id/notulensi/finalisasi method=POST
+func FinalisasiNotulensi(ctx context.Context, id int) (*NotulensiDetail, error) {
+	nis, _ := auth.UserID()
+	ud := auth.Data().(*user.UserData)
+
+	if ud.GroupName != "Sekretaris" || ud.Level != 1 {
+		return nil, &errs.Error{
+			Code:    errs.PermissionDenied,
+			Message: "hanya Sekretaris Umum (level 1) yang dapat memfinalisasi notulensi",
 		}
 	}
-	return &MessageResponse{Message: "Attendance recorded"}, nil
+
+	var n NotulensiDetail
+	var retFinalisasi sql.NullString
+	err := db.QueryRow(ctx, `
+		UPDATE notulensi SET status = 'Final', difinalisasi_oleh = $1, updated_at = NOW()
+		WHERE rapat_id = $2
+		RETURNING notulensi_id, rapat_id, isi, difinalisasi_oleh, status, updated_at
+	`, string(nis), id).
+		Scan(&n.NotulensiID, &n.RapatID, &n.Isi, &retFinalisasi, &n.Status, &n.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &errs.Error{Code: errs.NotFound, Message: "notulensi tidak ditemukan"}
+		}
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if retFinalisasi.Valid {
+		n.DifinalisasiOleh = &retFinalisasi.String
+	}
+	return &n, nil
 }
 
-//encore:api auth path=/meeting/:id/attendance method=GET
-func GetAttendance(ctx context.Context, id int) (*AttendanceListResponse, error) {
+//encore:api auth path=/rapat/:id/notulensi method=GET
+func GetNotulensi(ctx context.Context, id int) (*NotulensiDetail, error) {
+	var n NotulensiDetail
+	var retFinalisasi sql.NullString
+	err := db.QueryRow(ctx, `
+		SELECT notulensi_id, rapat_id, isi, difinalisasi_oleh, status, updated_at
+		FROM notulensi WHERE rapat_id = $1
+	`, id).Scan(&n.NotulensiID, &n.RapatID, &n.Isi, &retFinalisasi, &n.Status, &n.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &errs.Error{Code: errs.NotFound, Message: "notulensi belum ada"}
+		}
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if retFinalisasi.Valid {
+		n.DifinalisasiOleh = &retFinalisasi.String
+	}
+	return &n, nil
+}
+
+// ============================================================
+// PRESENSI — QR scan, verifikasi izin/sakit, list rekap
+// ============================================================
+
+type PresensiDetail struct {
+	PresensiID       int        `json:"presensi_id"`
+	AcaraType        string     `json:"acara_type"`
+	AcaraID          int        `json:"acara_id"`
+	NIS              string     `json:"nis"`
+	Tipe             string     `json:"tipe"`
+	Keterangan       *string    `json:"keterangan"`
+	BuktiURL         *string    `json:"bukti_url"`
+	FotoURL          *string    `json:"foto_url"`
+	StatusVerifikasi string     `json:"status_verifikasi"`
+	WaktuSubmit      time.Time  `json:"waktu_submit"`
+}
+
+type ScanQRParams struct {
+	QRToken  string  `json:"qr_token"`
+	AcaraID  int     `json:"acara_id"`
+	FotoURL  *string `json:"foto_url"`  // selfie untuk QR Masuk
+	Tipe     string  `json:"tipe"`      // 'Hadir' (QR Masuk) atau 'Izin'/'Sakit' (QR Izin)
+	Keterangan *string `json:"keterangan"`
+	BuktiURL *string `json:"bukti_url"` // upload surat untuk Izin/Sakit
+}
+
+type ListPresensiResponse struct {
+	Presensi []PresensiDetail `json:"presensi"`
+}
+
+// ScanPresensi — endpoint utama saat user scan QR (masuk atau izin/sakit)
+//encore:api auth path=/presensi/scan method=POST
+func ScanPresensi(ctx context.Context, params *ScanQRParams) (*PresensiDetail, error) {
+	nis, _ := auth.UserID()
+
+	if params.Tipe != "Hadir" && params.Tipe != "Izin" && params.Tipe != "Sakit" {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "tipe harus 'Hadir', 'Izin', atau 'Sakit'"}
+	}
+
+	// Validasi QR token sesuai rapat/kegiatan
+	var qrDB sql.NullString
+	err := db.QueryRow(ctx, `SELECT qr_code FROM rapat WHERE rapat_id = $1`, params.AcaraID).Scan(&qrDB)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.NotFound, Message: "acara tidak ditemukan"}
+	}
+	if !qrDB.Valid || qrDB.String != params.QRToken {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "QR code tidak valid"}
+	}
+
+	// Status verifikasi: Hadir langsung Disetujui; Izin/Sakit menunggu
+	statusVerifikasi := "Menunggu"
+	if params.Tipe == "Hadir" {
+		statusVerifikasi = "Disetujui"
+	}
+
+	var keterangan, buktiURL, fotoURL sql.NullString
+	if params.Keterangan != nil {
+		keterangan.Valid = true
+		keterangan.String = *params.Keterangan
+	}
+	if params.BuktiURL != nil {
+		buktiURL.Valid = true
+		buktiURL.String = *params.BuktiURL
+	}
+	if params.FotoURL != nil {
+		fotoURL.Valid = true
+		fotoURL.String = *params.FotoURL
+	}
+
+	var p PresensiDetail
+	var retKet, retBukti, retFoto sql.NullString
+	err = db.QueryRow(ctx, `
+		INSERT INTO presensi
+			(acara_type, acara_id, nis, tipe, keterangan, bukti_url, foto_url, status_verifikasi)
+		VALUES ('Rapat', $1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (acara_type, acara_id, nis)
+		DO UPDATE SET tipe = $3, keterangan = $4, bukti_url = $5, foto_url = $6,
+		              status_verifikasi = $7, waktu_submit = NOW()
+		RETURNING presensi_id, acara_type, acara_id, nis, tipe, keterangan,
+		          bukti_url, foto_url, status_verifikasi, waktu_submit
+	`, params.AcaraID, string(nis), params.Tipe, keterangan, buktiURL, fotoURL, statusVerifikasi).
+		Scan(
+			&p.PresensiID, &p.AcaraType, &p.AcaraID, &p.NIS, &p.Tipe,
+			&retKet, &retBukti, &retFoto, &p.StatusVerifikasi, &p.WaktuSubmit,
+		)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if retKet.Valid {
+		p.Keterangan = &retKet.String
+	}
+	if retBukti.Valid {
+		p.BuktiURL = &retBukti.String
+	}
+	if retFoto.Valid {
+		p.FotoURL = &retFoto.String
+	}
+	return &p, nil
+}
+
+// ListPresensiRapat — rekap presensi satu rapat
+//encore:api auth path=/rapat/:id/presensi method=GET
+func ListPresensiRapat(ctx context.Context, id int) (*ListPresensiResponse, error) {
 	rows, err := db.Query(ctx, `
-		SELECT id, meeting_id, user_nis, status FROM attendance WHERE meeting_id = $1 ORDER BY id ASC
+		SELECT presensi_id, acara_type, acara_id, nis, tipe, keterangan,
+		       bukti_url, foto_url, status_verifikasi, waktu_submit
+		FROM presensi WHERE acara_type = 'Rapat' AND acara_id = $1
+		ORDER BY waktu_submit ASC
 	`, id)
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}
 	defer rows.Close()
 
-	var attendance []AttendanceDetail
+	var list []PresensiDetail
 	for rows.Next() {
-		var a AttendanceDetail
-		err := rows.Scan(&a.ID, &a.MeetingID, &a.UserNIS, &a.Status)
+		p, err := scanPresensi(rows)
 		if err != nil {
 			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 		}
-		attendance = append(attendance, a)
+		list = append(list, *p)
 	}
-	return &AttendanceListResponse{Attendance: attendance}, nil
+	return &ListPresensiResponse{Presensi: list}, nil
+}
+
+// VerifikasiPresensi — Sekretaris menyetujui/menolak entri Izin/Sakit
+type VerifikasiPresensiParams struct {
+	StatusVerifikasi string  `json:"status_verifikasi"` // 'Disetujui', 'Ditolak'
+	Catatan          *string `json:"catatan"`
+}
+
+//encore:api auth path=/presensi/:id/verifikasi method=POST
+func VerifikasiPresensi(ctx context.Context, id int, params *VerifikasiPresensiParams) (*PresensiDetail, error) {
+	ud := auth.Data().(*user.UserData)
+	if ud.GroupName != "Sekretaris" && ud.GroupName != "Trimitra" {
+		return nil, &errs.Error{
+			Code:    errs.PermissionDenied,
+			Message: "hanya Sekretaris atau Trimitra yang dapat memverifikasi presensi",
+		}
+	}
+	if params.StatusVerifikasi != "Disetujui" && params.StatusVerifikasi != "Ditolak" {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "status_verifikasi harus 'Disetujui' atau 'Ditolak'"}
+	}
+
+	res, err := db.Exec(ctx, `
+		UPDATE presensi SET status_verifikasi = $1
+		WHERE presensi_id = $2 AND status_verifikasi = 'Menunggu'
+	`, params.StatusVerifikasi, id)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if res.RowsAffected() == 0 {
+		return nil, &errs.Error{Code: errs.NotFound, Message: "presensi tidak ditemukan atau sudah diverifikasi"}
+	}
+
+	var p PresensiDetail
+	var retKet, retBukti, retFoto sql.NullString
+	err = db.QueryRow(ctx, `
+		SELECT presensi_id, acara_type, acara_id, nis, tipe, keterangan,
+		       bukti_url, foto_url, status_verifikasi, waktu_submit
+		FROM presensi WHERE presensi_id = $1
+	`, id).Scan(
+		&p.PresensiID, &p.AcaraType, &p.AcaraID, &p.NIS, &p.Tipe,
+		&retKet, &retBukti, &retFoto, &p.StatusVerifikasi, &p.WaktuSubmit,
+	)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if retKet.Valid {
+		p.Keterangan = &retKet.String
+	}
+	if retBukti.Valid {
+		p.BuktiURL = &retBukti.String
+	}
+	if retFoto.Valid {
+		p.FotoURL = &retFoto.String
+	}
+	return &p, nil
+}
+
+// ListPresensiMenunggu — antrian Izin/Sakit yang belum diverifikasi
+//encore:api auth path=/presensi/menunggu method=GET
+func ListPresensiMenunggu(ctx context.Context) (*ListPresensiResponse, error) {
+	ud := auth.Data().(*user.UserData)
+	if ud.GroupName != "Sekretaris" && ud.GroupName != "Trimitra" {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Sekretaris atau Trimitra"}
+	}
+
+	rows, err := db.Query(ctx, `
+		SELECT presensi_id, acara_type, acara_id, nis, tipe, keterangan,
+		       bukti_url, foto_url, status_verifikasi, waktu_submit
+		FROM presensi
+		WHERE status_verifikasi = 'Menunggu'
+		ORDER BY waktu_submit ASC
+	`)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	defer rows.Close()
+
+	var list []PresensiDetail
+	for rows.Next() {
+		p, err := scanPresensi(rows)
+		if err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+		list = append(list, *p)
+	}
+	return &ListPresensiResponse{Presensi: list}, nil
+}
+
+// ============================================================
+// PENGUMUMAN
+// ============================================================
+
+type PengumumanDetail struct {
+	PengumumanID int       `json:"pengumuman_id"`
+	Judul        string    `json:"judul"`
+	Isi          string    `json:"isi"`
+	DibuatOleh   string    `json:"dibuat_oleh"`
+	Target       string    `json:"target"`
+	DivisionID   *int      `json:"division_id"`
+	Tanggal      time.Time `json:"tanggal"`
+}
+
+type CreatePengumumanParams struct {
+	Judul      string `json:"judul"`
+	Isi        string `json:"isi"`
+	Target     string `json:"target"`     // 'Organisasi', 'Divisi'
+	DivisionID *int   `json:"division_id"` // wajib jika target='Divisi'
+}
+
+type ListPengumumanResponse struct {
+	Pengumuman []PengumumanDetail `json:"pengumuman"`
+}
+
+//encore:api auth path=/pengumuman method=GET
+func ListPengumuman(ctx context.Context) (*ListPengumumanResponse, error) {
+	ud := auth.Data().(*user.UserData)
+
+	var rows *sqldb.Rows
+	var err error
+
+	if ud.HasScopeAll() {
+		// Trimitra, Pembina, Sekretaris Umum, Bendahara Umum — lihat semua
+		rows, err = db.Query(ctx, `
+			SELECT pengumuman_id, judul, isi, dibuat_oleh, target, division_id, tanggal
+			FROM pengumuman ORDER BY tanggal DESC
+		`)
+	} else if ud.DivisionID != nil {
+		// Kepala Divisi & Staf — org + divisinya
+		rows, err = db.Query(ctx, `
+			SELECT pengumuman_id, judul, isi, dibuat_oleh, target, division_id, tanggal
+			FROM pengumuman
+			WHERE target = 'Organisasi' OR (target = 'Divisi' AND division_id = $1)
+			ORDER BY tanggal DESC
+		`, *ud.DivisionID)
+	} else {
+		rows, err = db.Query(ctx, `
+			SELECT pengumuman_id, judul, isi, dibuat_oleh, target, division_id, tanggal
+			FROM pengumuman WHERE target = 'Organisasi' ORDER BY tanggal DESC
+		`)
+	}
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	defer rows.Close()
+
+	var list []PengumumanDetail
+	for rows.Next() {
+		p, err := scanPengumuman(rows)
+		if err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+		list = append(list, *p)
+	}
+	return &ListPengumumanResponse{Pengumuman: list}, nil
+}
+
+//encore:api auth path=/pengumuman method=POST
+func BuatPengumuman(ctx context.Context, params *CreatePengumumanParams) (*PengumumanDetail, error) {
+	nis, _ := auth.UserID()
+	ud := auth.Data().(*user.UserData)
+
+	if params.Target != "Organisasi" && params.Target != "Divisi" {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "target harus 'Organisasi' atau 'Divisi'"}
+	}
+	if params.Target == "Organisasi" {
+		if ud.GroupName != "Trimitra" && ud.GroupName != "Sekretaris" && ud.GroupName != "Pembina" {
+			return nil, &errs.Error{
+				Code:    errs.PermissionDenied,
+				Message: "hanya Trimitra, Sekretaris, atau Pembina yang dapat membuat pengumuman organisasi",
+			}
+		}
+	} else {
+		if ud.GroupName != "Kepala Divisi" && ud.GroupName != "Trimitra" {
+			return nil, &errs.Error{
+				Code:    errs.PermissionDenied,
+				Message: "hanya Kepala Divisi atau Trimitra yang dapat membuat pengumuman divisi",
+			}
+		}
+	}
+
+	divID := sql.NullInt32{}
+	if params.Target == "Divisi" {
+		if params.DivisionID != nil {
+			divID.Valid = true
+			divID.Int32 = int32(*params.DivisionID)
+		} else if ud.DivisionID != nil {
+			divID.Valid = true
+			divID.Int32 = int32(*ud.DivisionID)
+		}
+	}
+
+	var p PengumumanDetail
+	var retDivID sql.NullInt32
+	err := db.QueryRow(ctx, `
+		INSERT INTO pengumuman (judul, isi, dibuat_oleh, target, division_id)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING pengumuman_id, judul, isi, dibuat_oleh, target, division_id, tanggal
+	`, params.Judul, params.Isi, string(nis), params.Target, divID).
+		Scan(&p.PengumumanID, &p.Judul, &p.Isi, &p.DibuatOleh, &p.Target, &retDivID, &p.Tanggal)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if retDivID.Valid {
+		v := int(retDivID.Int32)
+		p.DivisionID = &v
+	}
+	return &p, nil
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+
+func scanRapat(row interface{ Scan(...interface{}) error }) (*RapatDetail, error) {
+	var r RapatDetail
+	var divID sql.NullInt32
+	var qr sql.NullString
+	if err := row.Scan(
+		&r.RapatID, &r.PeriodeID, &divID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
+		&r.DibuatOleh, &r.Status, &qr, &r.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	if divID.Valid {
+		v := int(divID.Int32)
+		r.DivisionID = &v
+	}
+	if qr.Valid {
+		r.QRCode = &qr.String
+	}
+	return &r, nil
+}
+
+func scanPresensi(row interface{ Scan(...interface{}) error }) (*PresensiDetail, error) {
+	var p PresensiDetail
+	var ket, bukti, foto sql.NullString
+	if err := row.Scan(
+		&p.PresensiID, &p.AcaraType, &p.AcaraID, &p.NIS, &p.Tipe,
+		&ket, &bukti, &foto, &p.StatusVerifikasi, &p.WaktuSubmit,
+	); err != nil {
+		return nil, err
+	}
+	if ket.Valid {
+		p.Keterangan = &ket.String
+	}
+	if bukti.Valid {
+		p.BuktiURL = &bukti.String
+	}
+	if foto.Valid {
+		p.FotoURL = &foto.String
+	}
+	return &p, nil
+}
+
+func scanPengumuman(row interface{ Scan(...interface{}) error }) (*PengumumanDetail, error) {
+	var p PengumumanDetail
+	var divID sql.NullInt32
+	if err := row.Scan(
+		&p.PengumumanID, &p.Judul, &p.Isi, &p.DibuatOleh, &p.Target, &divID, &p.Tanggal,
+	); err != nil {
+		return nil, err
+	}
+	if divID.Valid {
+		v := int(divID.Int32)
+		p.DivisionID = &v
+	}
+	return &p, nil
 }

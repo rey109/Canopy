@@ -1,0 +1,4 @@
+-- Migration ini sudah tidak relevan setelah redesign schema.
+-- Kolom jabatan dan is_primary_in_role tidak lagi ada di tabel users.
+-- Informasi jabatan sekarang ada di tabel roles (role_name) dan kepengurusan.
+-- File ini dikosongkan agar urutan migrasi Encore tidak berubah.

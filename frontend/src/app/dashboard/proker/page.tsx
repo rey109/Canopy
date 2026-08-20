@@ -1,31 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, type ProkerDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-
-interface Proker {
-  id: number;
-  name: string;
-  description: string;
-  division_id: number;
-  budget: number;
-  status: string;
-  start_date: string;
-  end_date: string;
-  created_by: string;
-}
+import Link from "next/link";
 
 const statusBadge: Record<string, string> = {
-  Rencana: "badge-neutral",
-  Berjalan: "badge-info",
-  Dinjau: "badge-warning",
-  Selesai: "badge-success",
+  "Belum Mulai": "badge-neutral",
+  "Berjalan": "badge-info",
+  "Selesai": "badge-success",
+  "Dibatalkan": "badge-danger",
 };
 
 export default function ProkerPage() {
   const { user } = useAuth();
-  const [prokers, setProkers] = useState<Proker[]>([]);
+  const [prokers, setProkers] = useState<ProkerDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -43,7 +32,7 @@ export default function ProkerPage() {
     api
       .listProkers()
       .then((res) => setProkers(res.prokers || []))
-      .catch(() => {})
+      .catch((err) => console.error("Gagal load proker:", err))
       .finally(() => setLoading(false));
   };
 
@@ -53,19 +42,15 @@ export default function ProkerPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user?.division_id) {
-      alert("Anda harus terhubung dengan divisi untuk membuat program kerja.");
-      return;
-    }
     setSubmitting(true);
     try {
       await api.createProker({
-        name,
-        description,
-        division_id: user.division_id,
-        budget: Number(budget),
-        start_date: new Date(startDate).toISOString(),
-        end_date: new Date(endDate).toISOString(),
+        nama: name,
+        deskripsi: description,
+        division_id: user?.division_id || undefined,
+        anggaran_disetujui: Number(budget),
+        tanggal_mulai: new Date(startDate).toISOString(),
+        tanggal_selesai: new Date(endDate).toISOString(),
       });
       setShowModal(false);
       // Reset form
@@ -82,16 +67,22 @@ export default function ProkerPage() {
     }
   };
 
-  const handleAjukanProposal = async (id: number) => {
-    setActioningId(id);
+  const handleAjukanProposal = async (proker_id: number) => {
+    setActioningId(proker_id);
     try {
-      await api.submitProposal(id);
+      // Proposal diajukan dengan membuat Dokumen jenis_id = 1 (Proposal Kegiatan)
+      await api.buatDokumen({
+        proker_id,
+        jenis_id: 1, // 1 = Proposal Kegiatan
+        file_url: `https://canopy-docs.s3.amazonaws.com/proposals/proker-${proker_id}.pdf`,
+        is_eksternal: false,
+      });
       alert("Proposal berhasil diajukan untuk proses persetujuan!");
       fetchProkers();
     } catch (err: any) {
       alert("Gagal mengajukan proposal: " + err.message);
     } finally {
-      setActioningId(null);
+      setActioningId(proker_id);
     }
   };
 
@@ -103,7 +94,7 @@ export default function ProkerPage() {
     }).format(val);
   };
 
-  const isKetuaBidang = user?.role === "Ketua Bidang";
+  const isKetuaBidang = user?.group_name === "Kepala Divisi";
 
   return (
     <div className="animate-fade-in">
@@ -141,35 +132,41 @@ export default function ProkerPage() {
       ) : (
         <div className="space-y-3 stagger-children">
           {prokers.map((p) => {
-            const canSubmit = isKetuaBidang && user?.division_id === p.division_id && p.status === "Rencana";
+            const canSubmit = isKetuaBidang && user?.division_id === p.division_id && p.status === "Belum Mulai";
             return (
-              <div key={p.id} className="glass-card p-5 transition-all hover:translate-y-[-1px] flex flex-col md:flex-row justify-between gap-4">
+              <div key={p.proker_id} className="glass-card p-5 transition-all hover:translate-y-[-1px] flex flex-col md:flex-row justify-between gap-4">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="badge badge-info text-[10px]">Bidang {p.division_id}</span>
-                    <h3 className="font-semibold text-base">{p.name}</h3>
+                    {p.division_id && (
+                      <span className="badge badge-info text-[10px]">Bidang {p.division_id}</span>
+                    )}
+                    <h3 className="font-semibold text-base hover:text-[var(--accent)]">
+                      <Link href={`/dashboard/proker/${p.proker_id}`}>
+                        {p.nama}
+                      </Link>
+                    </h3>
                     <span className={`badge ${statusBadge[p.status] || "badge-neutral"}`}>
                       {p.status}
                     </span>
                   </div>
                   <p className="text-sm text-[var(--text-secondary)] mb-3 leading-relaxed">
-                    {p.description}
+                    {p.deskripsi}
                   </p>
                   <div className="flex items-center gap-4 text-xs text-[var(--text-muted)]">
-                    <span>Anggaran: <span className="font-medium text-[var(--text-primary)]">{formatCurrency(p.budget)}</span></span>
+                    <span>Anggaran: <span className="font-medium text-[var(--text-primary)]">{formatCurrency(p.anggaran_disetujui)}</span></span>
                     <span>•</span>
-                    <span>Jadwal: {new Date(p.start_date).toLocaleDateString("id-ID")} — {new Date(p.end_date).toLocaleDateString("id-ID")}</span>
+                    <span>Jadwal: {new Date(p.tanggal_mulai).toLocaleDateString("id-ID")} — {new Date(p.tanggal_selesai).toLocaleDateString("id-ID")}</span>
                   </div>
                 </div>
 
                 {canSubmit && (
                   <div className="flex items-center self-end md:self-center">
                     <button
-                      onClick={() => handleAjukanProposal(p.id)}
-                      disabled={actioningId === p.id}
+                      onClick={() => handleAjukanProposal(p.proker_id)}
+                      disabled={actioningId === p.proker_id}
                       className="btn-primary text-xs whitespace-nowrap"
                     >
-                      {actioningId === p.id ? "Memproses..." : "Ajukan Proposal"}
+                      {actioningId === p.proker_id ? "Memproses..." : "Ajukan Proposal"}
                     </button>
                   </div>
                 )}

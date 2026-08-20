@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 const divisions = [
   { id: 1, name: "Keagamaan & Ketaqwaan", icon: "🕌", gradient: "from-amber-500 to-yellow-500" },
@@ -18,19 +20,40 @@ const divisions = [
 
 export default function TeamPage() {
   const { user } = useAuth();
+  const router = useRouter();
+
+  const isAnggotaAtauKetua = user?.role === "Anggota" || user?.role === "Ketua Bidang";
+  const isTrimitra = user?.role === "Trimitra";
+
+  useEffect(() => {
+    // If Anggota or Ketua Bidang, redirect straight to their own division page
+    if (isAnggotaAtauKetua && user?.division_id) {
+      router.replace(`/dashboard/team/${user.division_id}`);
+    }
+  }, [isAnggotaAtauKetua, user, router]);
+
+  if (isAnggotaAtauKetua) {
+    return <div className="p-8 text-center text-sm text-[var(--text-muted)] animate-pulse">Mengalihkan ke halaman divisi Anda...</div>;
+  }
 
   return (
-    <div className="animate-fade-in">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">Tim Divisi & Seksi Bidang</h1>
-        <p className="text-[var(--text-secondary)] text-sm mt-1">
-          Pilih divisi untuk melihat modul khusus dan data spesifik divisi tersebut
-        </p>
+    <div className="animate-fade-in space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Struktur Organisasi</h1>
+          <p className="text-[var(--text-secondary)] text-sm mt-1">
+            Pantau dan kelola seluruh divisi dan bidang dalam organisasi.
+          </p>
+        </div>
+        {isTrimitra && (
+          <button className="btn-primary text-xs" onClick={() => alert("Fitur kelola struktur (tambah/hapus anggota) dalam pengembangan.")}>
+            Kelola Struktur
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger-children">
         {divisions.map((d) => {
-          const isMyDivision = user?.division_id === d.id;
           return (
             <Link
               key={d.id}
@@ -45,9 +68,6 @@ export default function TeamPage() {
                   <h3 className="font-semibold text-sm group-hover:text-[var(--accent)] transition-colors">
                     Bidang {d.id}
                   </h3>
-                  {isMyDivision && (
-                    <span className="badge badge-success text-[10px]">Divisi Anda</span>
-                  )}
                 </div>
                 <p className="text-xs text-[var(--text-secondary)] mt-0.5 line-clamp-2">{d.name}</p>
               </div>

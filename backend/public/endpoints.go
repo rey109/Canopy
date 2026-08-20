@@ -147,10 +147,10 @@ func ListAspirations(ctx context.Context) (*ListAspirationsResponse, error) {
 //encore:api auth path=/public/aspiration/:id/status method=PUT
 func UpdateAspirationStatus(ctx context.Context, id int, params *UpdateAspirationStatusParams) (*MessageResponse, error) {
 	userData := auth.Data().(*user.UserData)
-	if userData.Role != "Trimitra" && userData.Role != "Sekretariat" && userData.Role != "Pembina" {
+	if userData.GroupName != "Trimitra" && userData.GroupName != "Sekretaris" && userData.GroupName != "Pembina" {
 		return nil, &errs.Error{
 			Code:    errs.PermissionDenied,
-			Message: "insufficient permissions to update aspiration status",
+			Message: "hanya Trimitra, Sekretaris, atau Pembina yang dapat mengubah status aspirasi",
 		}
 	}
 

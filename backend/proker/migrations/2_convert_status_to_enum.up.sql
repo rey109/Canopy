@@ -1,5 +1,3 @@
-CREATE TYPE proker_status AS ENUM ('Rencana', 'Berjalan', 'Dinjau', 'Selesai');
-
-ALTER TABLE prokers ALTER COLUMN status DROP DEFAULT;
-ALTER TABLE prokers ALTER COLUMN status TYPE proker_status USING status::proker_status;
-ALTER TABLE prokers ALTER COLUMN status SET DEFAULT 'Rencana'::proker_status;
+-- Migration ini sudah tidak relelan setelah redesign schema.
+-- Status proker sekarang menggunakan VARCHAR dengan CHECK constraint di migration 2_add_constraints.
+-- File ini dikosongkan agar urutan migrasi Encore tidak berubah.

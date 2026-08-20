@@ -1,0 +1,3 @@
+-- Migration ini sudah tidak relevan.
+-- Schema announcements digantikan oleh tabel pengumuman di service meeting.
+-- File ini dikosongkan agar urutan migrasi Encore tidak berubah.
