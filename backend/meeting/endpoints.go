@@ -429,6 +429,51 @@ func ListPresensiRapat(ctx context.Context, id int) (*ListPresensiResponse, erro
 	return &ListPresensiResponse{Presensi: list}, nil
 }
 
+type AttendanceEntry struct {
+	UserNIS string `json:"user_nis"`
+	Status  string `json:"status"` // 'hadir', 'izin', 'sakit', 'alpa'
+}
+
+type RecordAttendanceParams struct {
+	Entries []AttendanceEntry `json:"entries"`
+}
+
+type RapatMessageResponse struct {
+	Message string `json:"message"`
+}
+
+//encore:api auth path=/rapat/:id/presensi method=POST
+func RecordAttendance(ctx context.Context, id int, params *RecordAttendanceParams) (*RapatMessageResponse, error) {
+	ud := auth.Data().(*user.UserData)
+	if ud.GroupName != "Sekretaris" && ud.GroupName != "Trimitra" && ud.GroupName != "Pembina" {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Sekretaris, Trimitra atau Pembina"}
+	}
+
+	for _, entry := range params.Entries {
+		status := "Alpa"
+		switch entry.Status {
+		case "hadir":
+			status = "Hadir"
+		case "izin":
+			status = "Izin"
+		case "sakit":
+			status = "Sakit"
+		}
+
+		_, err := db.Exec(ctx, `
+			INSERT INTO presensi (acara_type, acara_id, nis, tipe, status_verifikasi)
+			VALUES ('Rapat', $1, $2, $3, 'Disetujui')
+			ON CONFLICT (acara_type, acara_id, nis)
+			DO UPDATE SET tipe = $3, status_verifikasi = 'Disetujui', waktu_submit = NOW()
+		`, id, entry.UserNIS, status)
+		if err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+	}
+
+	return &RapatMessageResponse{Message: "Absensi berhasil direkam"}, nil
+}
+
 // VerifikasiPresensi — Sekretaris menyetujui/menolak entri Izin/Sakit
 type VerifikasiPresensiParams struct {
 	StatusVerifikasi string  `json:"status_verifikasi"` // 'Disetujui', 'Ditolak'

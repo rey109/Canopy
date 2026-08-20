@@ -113,7 +113,7 @@ export default function ProkerDetailPage({ params }: PageProps) {
       setTaskAssignedTo("");
       // reload tasks
       const tRes = await api.listTasks();
-      setTasks(tRes.value.tasks.filter(t => t.proker_id === prokerId) || []);
+      setTasks(tRes.tasks.filter((t: TaskDetail) => t.proker_id === prokerId) || []);
       alert("Tugas berhasil ditambahkan!");
     } catch (err: any) {
       alert("Gagal membuat tugas: " + err.message);

@@ -3,18 +3,18 @@
 -- ============================================================
 CREATE TABLE program_kerja (
     proker_id            SERIAL PRIMARY KEY,
-    division_id          INT DEFAULT NULL REFERENCES divisions(division_id),
+    division_id          INT DEFAULT NULL,
     -- null = proker organisasi/lintas divisi
-    periode_id           INT NOT NULL REFERENCES periode(periode_id),
+    periode_id           INT NOT NULL,
     nama                 VARCHAR(255) NOT NULL,
     deskripsi            TEXT NOT NULL DEFAULT '',
     anggaran_disetujui   NUMERIC(15,2) NOT NULL DEFAULT 0.00,
     status               VARCHAR(30) NOT NULL DEFAULT 'Belum Mulai',
     -- 'Belum Mulai', 'Berjalan', 'Selesai', 'Dibatalkan'
-    penanggung_jawab     VARCHAR(50) DEFAULT NULL REFERENCES users(nis),
+    penanggung_jawab     VARCHAR(50) DEFAULT NULL,
     tanggal_mulai        DATE NOT NULL,
     tanggal_selesai      DATE NOT NULL,
-    dibuat_oleh          VARCHAR(50) NOT NULL REFERENCES users(nis),
+    dibuat_oleh          VARCHAR(50) NOT NULL,
     created_at           TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -27,10 +27,10 @@ CREATE INDEX idx_proker_periode  ON program_kerja(periode_id);
 -- ============================================================
 CREATE TABLE task_template (
     template_id    SERIAL PRIMARY KEY,
-    division_id    INT NOT NULL REFERENCES divisions(division_id),
+    division_id    INT NOT NULL,
     nama_template  VARCHAR(255) NOT NULL,
     -- "Log Prestasi Lomba", "Produk Bazaar", dll
-    dibuat_oleh    VARCHAR(50) NOT NULL REFERENCES users(nis),
+    dibuat_oleh    VARCHAR(50) NOT NULL,
     created_at     TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -57,9 +57,9 @@ CREATE TABLE tasks (
     template_id        INT DEFAULT NULL REFERENCES task_template(template_id),
     scope              VARCHAR(20) NOT NULL DEFAULT 'Individual',
     -- 'Individual', 'General'
-    assigned_to        VARCHAR(50) DEFAULT NULL REFERENCES users(nis),
-    offered_by         VARCHAR(50) DEFAULT NULL REFERENCES users(nis),
-    dibuat_oleh        VARCHAR(50) NOT NULL REFERENCES users(nis),
+    assigned_to        VARCHAR(50) DEFAULT NULL,
+    offered_by         VARCHAR(50) DEFAULT NULL,
+    dibuat_oleh        VARCHAR(50) NOT NULL,
     judul              VARCHAR(255) NOT NULL,
     deskripsi          TEXT NOT NULL DEFAULT '',
     deadline           DATE NOT NULL,
@@ -81,7 +81,7 @@ CREATE INDEX idx_tasks_status      ON tasks(status);
 CREATE TABLE catatan_pembinaan (
     catatan_id   SERIAL PRIMARY KEY,
     proker_id    INT NOT NULL REFERENCES program_kerja(proker_id) ON DELETE CASCADE,
-    dibuat_oleh  VARCHAR(50) NOT NULL REFERENCES users(nis),
+    dibuat_oleh  VARCHAR(50) NOT NULL,
     isi          TEXT NOT NULL,
     tanggal      TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

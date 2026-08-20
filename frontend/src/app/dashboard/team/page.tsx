@@ -22,8 +22,8 @@ export default function TeamPage() {
   const { user } = useAuth();
   const router = useRouter();
 
-  const isAnggotaAtauKetua = user?.role === "Anggota" || user?.role === "Ketua Bidang";
-  const isTrimitra = user?.role === "Trimitra";
+  const isAnggotaAtauKetua = user?.group_name === "Staf" || user?.group_name === "Kepala Divisi";
+  const isTrimitra = user?.group_name === "Trimitra";
 
   useEffect(() => {
     // If Anggota or Ketua Bidang, redirect straight to their own division page

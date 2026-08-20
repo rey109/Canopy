@@ -3,14 +3,14 @@
 -- ============================================================
 CREATE TABLE rapat (
     rapat_id    SERIAL PRIMARY KEY,
-    periode_id  INT NOT NULL REFERENCES periode(periode_id),
-    division_id INT DEFAULT NULL REFERENCES divisions(division_id),
+    periode_id  INT NOT NULL,
+    division_id INT DEFAULT NULL,
     -- null = rapat organisasi (semua divisi diundang)
     judul       VARCHAR(255) NOT NULL,
     tanggal     TIMESTAMP WITH TIME ZONE NOT NULL,
     lokasi      VARCHAR(255) NOT NULL DEFAULT '',
     agenda      TEXT NOT NULL DEFAULT '',
-    dibuat_oleh VARCHAR(50) NOT NULL REFERENCES users(nis),
+    dibuat_oleh VARCHAR(50) NOT NULL,
     status      VARCHAR(20) NOT NULL DEFAULT 'Terjadwal',
     -- 'Terjadwal', 'Berlangsung', 'Selesai'
     qr_code     VARCHAR(255) DEFAULT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE notulensi (
     rapat_id           INT NOT NULL UNIQUE REFERENCES rapat(rapat_id) ON DELETE CASCADE,
     -- UNIQUE: satu rapat hanya boleh punya satu notulensi
     isi                TEXT NOT NULL DEFAULT '',
-    difinalisasi_oleh  VARCHAR(50) DEFAULT NULL REFERENCES users(nis),
+    difinalisasi_oleh  VARCHAR(50) DEFAULT NULL,
     status             VARCHAR(10) NOT NULL DEFAULT 'Draft',
     -- 'Draft', 'Final'
     updated_at         TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -45,7 +45,7 @@ CREATE TABLE presensi (
     -- 'Rapat', 'Kegiatan'
     acara_id           INT NOT NULL,
     -- FK ke rapat.rapat_id ATAU program_kerja.proker_id tergantung acara_type
-    nis                VARCHAR(50) NOT NULL REFERENCES users(nis),
+    nis                VARCHAR(50) NOT NULL,
     tipe               VARCHAR(10) NOT NULL DEFAULT 'Alpa',
     -- 'Hadir', 'Izin', 'Sakit', 'Alpa'
     keterangan         TEXT DEFAULT NULL,
@@ -71,10 +71,10 @@ CREATE TABLE pengumuman (
     pengumuman_id  SERIAL PRIMARY KEY,
     judul          VARCHAR(255) NOT NULL,
     isi            TEXT NOT NULL DEFAULT '',
-    dibuat_oleh    VARCHAR(50) NOT NULL REFERENCES users(nis),
+    dibuat_oleh    VARCHAR(50) NOT NULL,
     target         VARCHAR(12) NOT NULL DEFAULT 'Organisasi',
     -- 'Organisasi', 'Divisi'
-    division_id    INT DEFAULT NULL REFERENCES divisions(division_id),
+    division_id    INT DEFAULT NULL,
     tanggal        TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

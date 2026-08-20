@@ -1,30 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, type HandoverDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-
-interface Handover {
-  id: number;
-  period: string;
-  final_balance: number;
-  unfinished_proker: any;
-  vendor_contacts: any;
-  signature_old_ketua: string;
-  signature_new_ketua: string;
-  signature_pembina: string;
-  created_at: string;
-}
 
 export default function HandoverPage() {
   const { user } = useAuth();
-  const [handovers, setHandovers] = useState<Handover[]>([]);
+  const [handovers, setHandovers] = useState<HandoverDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Sign State
-  const [signingItem, setSigningItem] = useState<Handover | null>(null);
+  const [signingItem, setSigningItem] = useState<HandoverDetail | null>(null);
   const [sigRole, setSigRole] = useState("old_ketua");
   const [signature, setSignature] = useState("");
   const [submittingSign, setSubmittingSign] = useState(false);
@@ -47,12 +35,16 @@ export default function HandoverPage() {
   useEffect(() => {
     fetchHandovers();
     // Pre-populate actual current balance
-    api.getBalance().then((b) => setFinalBalance(String(b.balance))).catch(() => {});
+    api.getBalance().then((b) => setFinalBalance(String(b.saldo))).catch(() => {});
   }, []);
 
   const handleCreateHandover = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
+
+    const parts = period.split("->");
+    const periode_lama = parts[0]?.trim() || "";
+    const periode_baru = parts[1]?.trim() || period.trim();
 
     const unfinishedArray = unfinishedText
       .split("\n")
@@ -63,26 +55,28 @@ export default function HandoverPage() {
       .split("\n")
       .filter((line) => line.trim() !== "")
       .map((line) => {
-        const parts = line.split(":");
+        const p = line.split(":");
         return {
-          name: parts[0]?.trim() || "",
-          contact: parts[1]?.trim() || "",
+          name: p[0]?.trim() || "",
+          contact: p[1]?.trim() || "",
         };
       });
 
     try {
       await api.createTransaction({
-        date: new Date().toISOString(),
-        type: "debit",
-        amount: Number(finalBalance),
-        description: `Serah Terima Jabatan & Penutupan Kas Periode ${period}`,
+        tanggal: new Date().toISOString().split("T")[0],
+        jenis: "Keluar",
+        nominal: Number(finalBalance),
+        deskripsi: `Serah Terima Jabatan & Penutupan Kas Periode ${period}`,
       }).catch(() => {});
 
       await api.createHandover({
-        period,
-        final_balance: Number(finalBalance),
-        unfinished_proker: unfinishedArray,
-        vendor_contacts: vendorsArray,
+        periode_lama,
+        periode_baru,
+        saldo_akhir: Number(finalBalance),
+        proker_belum_selesai: unfinishedArray,
+        kontak_vendor: vendorsArray,
+        catatan: `Serah Terima Jabatan & Penutupan Kas dari Periode ${periode_lama} ke Periode ${periode_baru}`,
       });
 
       setShowWizard(false);
@@ -126,7 +120,7 @@ export default function HandoverPage() {
     }).format(val);
   };
 
-  const canCreate = user?.role === "Trimitra" || user?.role === "Pembina";
+  const canCreate = user?.group_name === "Trimitra" || user?.group_name === "Pembina";
 
   return (
     <div className="animate-fade-in">
@@ -171,7 +165,7 @@ export default function HandoverPage() {
                 <div>
                   <h3 className="font-semibold text-lg">Berita Acara Serah Terima Jabatan</h3>
                   <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                    Periode Pengurus: {h.period}
+                    Periode Pengurus: {h.periode_lama} {"->"} {h.periode_baru}
                   </p>
                 </div>
                 <span className="text-xs text-[var(--text-muted)]">
@@ -182,7 +176,7 @@ export default function HandoverPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                 <div>
                   <p className="text-xs text-[var(--text-muted)] font-semibold uppercase">Saldo Kas Akhir</p>
-                  <p className="text-lg font-bold text-blue-400 mt-1">{formatCurrency(h.final_balance)}</p>
+                  <p className="text-lg font-bold text-blue-400 mt-1">{formatCurrency(h.saldo_akhir)}</p>
                 </div>
               </div>
 
@@ -191,8 +185,8 @@ export default function HandoverPage() {
                 <p className="text-xs text-[var(--text-muted)] font-semibold uppercase mb-3">Status Tanda Tangan Digital</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {[
-                    { label: "Ketua Lama (Trimitra)", sign: h.signature_old_ketua },
-                    { label: "Ketua Baru (Trimitra)", sign: h.signature_new_ketua },
+                    { label: "Ketua Lama (Trimitra)", sign: h.signature_ketua_lama },
+                    { label: "Ketua Baru (Trimitra)", sign: h.signature_ketua_baru },
                     { label: "Pembina OSIS (Pembina)", sign: h.signature_pembina },
                   ].map((s) => (
                     <div key={s.label} className="p-3 rounded-lg border border-[var(--border)] flex items-center justify-between">
@@ -205,7 +199,7 @@ export default function HandoverPage() {
                 </div>
               </div>
 
-              {user?.role !== "Anggota" && (
+              {user?.group_name !== "Staf" && (
                 <div className="flex justify-end gap-2 mt-6">
                   <button onClick={() => setSigningItem(h)} className="btn-primary text-xs">
                     Tanda Tangani

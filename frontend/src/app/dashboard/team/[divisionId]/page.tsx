@@ -32,9 +32,9 @@ export default function DivisionDetailPage() {
   const [loading, setLoading] = useState(true);
 
   const canEdit =
-    user?.role === "Trimitra" ||
-    user?.role === "Pembina" ||
-    (user?.role === "Ketua Bidang" && user?.division_id === Number(divId));
+    user?.group_name === "Trimitra" ||
+    user?.group_name === "Pembina" ||
+    (user?.group_name === "Kepala Divisi" && user?.division_id === Number(divId));
 
   useEffect(() => {
     const fetchers: Record<string, () => Promise<any>> = {

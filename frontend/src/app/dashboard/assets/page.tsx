@@ -1,29 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, type AssetDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-
-interface Asset {
-  id: number;
-  name: string;
-  description: string;
-  status: string;
-  created_at: string;
-}
 
 export default function AssetsPage() {
   const { user } = useAuth();
-  const [assets, setAssets] = useState<Asset[]>([]);
+  const [assets, setAssets] = useState<AssetDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+  const [selectedAsset, setSelectedAsset] = useState<AssetDetail | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Form State
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [prokerId, setProkerId] = useState("");
+  const [keterangan, setKeterangan] = useState("");
 
   const fetchAssets = () => {
     setLoading(true);
@@ -38,7 +31,7 @@ export default function AssetsPage() {
     fetchAssets();
   }, []);
 
-  const handleOpenBooking = (asset: Asset) => {
+  const handleOpenBooking = (asset: AssetDetail) => {
     setSelectedAsset(asset);
     setShowModal(true);
   };
@@ -49,16 +42,18 @@ export default function AssetsPage() {
     setSubmitting(true);
     try {
       await api.bookAsset({
-        asset_id: selectedAsset.id,
-        start_time: new Date(startTime).toISOString(),
-        end_time: new Date(endTime).toISOString(),
+        asset_id: selectedAsset.asset_id,
+        waktu_mulai: new Date(startTime).toISOString(),
+        waktu_selesai: new Date(endTime).toISOString(),
         proker_id: prokerId ? Number(prokerId) : undefined,
+        keterangan: keterangan || "Peminjaman aset",
       });
       setShowModal(false);
       setSelectedAsset(null);
       setStartTime("");
       setEndTime("");
       setProkerId("");
+      setKeterangan("");
       alert("Aset berhasil dipesan untuk kegiatan!");
       fetchAssets();
     } catch (err: any) {
@@ -95,22 +90,22 @@ export default function AssetsPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger-children">
           {assets.map((a) => (
-            <div key={a.id} className="glass-card p-5 flex flex-col justify-between hover:translate-y-[-1px] transition-all">
+            <div key={a.asset_id} className="glass-card p-5 flex flex-col justify-between hover:translate-y-[-1px] transition-all">
               <div>
                 <div className="flex items-start justify-between mb-3">
-                  <h3 className="font-semibold text-lg">{a.name}</h3>
-                  <span className={`badge ${a.status === "Available" ? "badge-success" : "badge-warning"}`}>
-                    {a.status === "Available" ? "Tersedia" : "Dipinjam"}
+                  <h3 className="font-semibold text-lg">{a.nama}</h3>
+                  <span className={`badge ${a.status === "Tersedia" ? "badge-success" : "badge-warning"}`}>
+                    {a.status}
                   </span>
                 </div>
-                <p className="text-sm text-[var(--text-secondary)] mb-4">{a.description || "Tidak ada deskripsi."}</p>
+                <p className="text-sm text-[var(--text-secondary)] mb-4">{a.deskripsi || "Tidak ada deskripsi."}</p>
               </div>
 
               <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4 mt-auto">
                 <button
                   onClick={() => handleOpenBooking(a)}
                   className="btn-primary text-xs py-1.5 px-3"
-                  disabled={a.status !== "Available" || user?.role === "Anggota"}
+                  disabled={a.status !== "Tersedia" || user?.group_name === "Staf"}
                 >
                   Booking Aset
                 </button>
@@ -124,7 +119,7 @@ export default function AssetsPage() {
       {showModal && selectedAsset && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="glass-card p-6 w-full max-w-md space-y-4">
-            <h3 className="text-lg font-semibold">🔑 Booking Aset: {selectedAsset.name}</h3>
+            <h3 className="text-lg font-semibold">🔑 Booking Aset: {selectedAsset.nama}</h3>
             <form onSubmit={handleBooking} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Mulai Peminjaman</label>
@@ -156,6 +151,17 @@ export default function AssetsPage() {
                   onChange={(e) => setProkerId(e.target.value)}
                   placeholder="Contoh: 1"
                   className="input-field"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Keterangan / Keperluan</label>
+                <textarea
+                  value={keterangan}
+                  onChange={(e) => setKeterangan(e.target.value)}
+                  placeholder="Contoh: Untuk perlengkapan rapat divisi"
+                  className="input-field min-h-[80px]"
+                  required
                 />
               </div>
 

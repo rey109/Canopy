@@ -221,6 +221,65 @@ export interface NavModulesResponse {
   divisi_modules: ModuleEntry[];
 }
 
+export interface JenisDokumenDetail {
+  jenis_id: number;
+  nama: string;
+}
+
+export interface ListJenisDokumenResponse {
+  jenis_dokumen: JenisDokumenDetail[];
+}
+
+export interface ListDokumenResponse {
+  dokumen: DokumenDetail[];
+}
+
+export interface ListPendingResponse {
+  persetujuan: PersetujuanDetail[];
+}
+
+export interface ListPresensiResponse {
+  presensi: PresensiDetail[];
+}
+
+export interface AssetDetail {
+  asset_id: number;
+  nama: string;
+  deskripsi: string;
+  status: string;
+  created_at: string;
+}
+
+export interface PeminjamanDetail {
+  peminjaman_id: number;
+  asset_id: number;
+  proker_id: number | null;
+  dipinjam_oleh: string;
+  waktu_mulai: string;
+  waktu_selesai: string;
+  keterangan: string;
+  created_at: string;
+}
+
+export interface ListPeminjamanResponse {
+  peminjaman: PeminjamanDetail[];
+}
+
+export interface HandoverDetail {
+  id: number;
+  periode_lama: string;
+  periode_baru: string;
+  saldo_akhir: number;
+  proker_belum_selesai: any;
+  kontak_vendor: any;
+  catatan: string;
+  signature_ketua_lama: string;
+  signature_ketua_baru: string;
+  signature_pembina: string;
+  dibuat_oleh: string;
+  created_at: string;
+}
+
 export const api = {
   // Auth
   login: (nis: string, password: string) =>
@@ -538,6 +597,12 @@ export const api = {
 
   listPresensiRapat: (id: number) =>
     request<ListPresensiResponse>(`/rapat/${id}/presensi`),
+
+  recordAttendance: (id: number, data: { entries: { user_nis: string; status: string }[] }) =>
+    request<{ message: string }>(`/rapat/${id}/presensi`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   verifikasiPresensi: (id: number, status_verifikasi: string, catatan?: string) =>
     request<PresensiDetail>(`/presensi/${id}/verifikasi`, {

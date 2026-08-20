@@ -11,8 +11,8 @@ export default function SchedulePage() {
     { id: 2, title: "Lomba Futsal", date: "20", type: "Event", time: "08:00" },
   ];
 
-  const canCreateDivisi = user?.role === "Ketua Bidang";
-  const canCreateOrganisasi = user?.role === "Sekretariat";
+  const canCreateDivisi = user?.group_name === "Kepala Divisi";
+  const canCreateOrganisasi = user?.group_name === "Sekretaris";
 
   return (
     <div className="space-y-6">

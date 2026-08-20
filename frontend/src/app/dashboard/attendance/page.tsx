@@ -15,14 +15,14 @@ export default function AttendancePage() {
   ];
 
   const canSeeRekap = 
-    user?.role === "Ketua Bidang" || 
-    user?.role === "Sekretariat" || 
-    user?.role === "Trimitra" || 
-    user?.role === "Pembina";
+    user?.group_name === "Kepala Divisi" || 
+    user?.group_name === "Sekretaris" || 
+    user?.group_name === "Trimitra" || 
+    user?.group_name === "Pembina";
 
   const rekapTitle = 
-    user?.role === "Ketua Bidang" ? "Rekap Divisi" :
-    user?.role === "Sekretariat" ? "Rekap Organisasi" :
+    user?.group_name === "Kepala Divisi" ? "Rekap Divisi" :
+    user?.group_name === "Sekretaris" ? "Rekap Organisasi" :
     "Rekap Lintas Divisi";
 
   return (

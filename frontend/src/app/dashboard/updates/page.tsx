@@ -22,7 +22,7 @@ export default function UpdatesPage() {
   const fetchAnnouncements = async () => {
     try {
       const res = await api.getAnnouncements();
-      setAnnouncements(res.announcements || []);
+      setAnnouncements(res.pengumuman || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -33,7 +33,7 @@ export default function UpdatesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.createAnnouncement({ title, body, scope });
+      await api.createAnnouncement({ judul: title, isi: body, target: scope === "organisasi" ? "Organisasi" : "Divisi" });
       setIsComposing(false);
       setTitle("");
       setBody("");
@@ -43,8 +43,8 @@ export default function UpdatesPage() {
     }
   };
 
-  const canCreateOrg = user?.role === "Trimitra" || user?.role === "Sekretariat" || user?.role === "Pembina";
-  const canCreateDiv = user?.role === "Ketua Bidang" || user?.role === "Trimitra";
+  const canCreateOrg = user?.group_name === "Trimitra" || user?.group_name === "Sekretaris" || user?.group_name === "Pembina";
+  const canCreateDiv = user?.group_name === "Kepala Divisi" || user?.group_name === "Trimitra";
   const canCreateAny = canCreateOrg || canCreateDiv;
 
   if (loading) {

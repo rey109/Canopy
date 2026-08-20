@@ -23,9 +23,9 @@ INSERT INTO kategori_transaksi (nama) VALUES
 -- ============================================================
 CREATE TABLE transaksi (
     transaksi_id       SERIAL PRIMARY KEY,
-    proker_id          INT DEFAULT NULL REFERENCES program_kerja(proker_id),
+    proker_id          INT DEFAULT NULL,
     kategori_id        INT DEFAULT NULL REFERENCES kategori_transaksi(kategori_id),
-    dicatat_oleh       VARCHAR(50) NOT NULL REFERENCES users(nis),
+    dicatat_oleh       VARCHAR(50) NOT NULL,
     jenis              VARCHAR(10) NOT NULL,
     -- 'Masuk', 'Keluar'
     nominal            NUMERIC(15,2) NOT NULL,
