@@ -1,4 +1,50 @@
 -- ============================================================
+-- Redesign schema adjustment for users table (safe migration)
+-- ============================================================
+DO $$
+BEGIN
+    -- Rename name to nama if name exists
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='name') THEN
+        ALTER TABLE users RENAME COLUMN name TO nama;
+    END IF;
+
+    -- Rename major to jurusan if major exists
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='major') THEN
+        ALTER TABLE users RENAME COLUMN major TO jurusan;
+    END IF;
+
+    -- Add tahun_masuk if not exists
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='tahun_masuk') THEN
+        ALTER TABLE users ADD COLUMN tahun_masuk INT NOT NULL DEFAULT 2024;
+    END IF;
+
+    -- Add foto_url if not exists
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='foto_url') THEN
+        ALTER TABLE users ADD COLUMN foto_url VARCHAR(500) DEFAULT NULL;
+    END IF;
+
+    -- Drop class if exists
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='class') THEN
+        ALTER TABLE users DROP COLUMN class;
+    END IF;
+
+    -- Drop role if exists
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='role') THEN
+        ALTER TABLE users DROP COLUMN role;
+    END IF;
+
+    -- Drop division_id if exists
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='division_id') THEN
+        ALTER TABLE users DROP COLUMN division_id;
+    END IF;
+
+    -- Drop management_period if exists
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='management_period') THEN
+        ALTER TABLE users DROP COLUMN management_period;
+    END IF;
+END $$;
+
+-- ============================================================
 -- Seed: USERS demo
 -- Password semua: "password123" (bcrypt hash)
 -- ============================================================
