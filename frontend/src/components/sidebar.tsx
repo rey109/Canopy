@@ -188,7 +188,6 @@ export default function Sidebar() {
     // Default fallback items jika API getNavModules gagal / offline
     const defaultItems: RenderItem[] = [
       { label: "Dashboard", href: "/dashboard", icon: iconMap["Dashboard"] },
-      { label: "Task", href: "/dashboard/task", icon: iconMap["Task"] },
       { label: "Program Kerja", href: "/dashboard/proker", icon: iconMap["Program Kerja"] },
       { label: "Rapat", href: "/dashboard/meetings", icon: iconMap["Rapat"] },
       { label: "Anggota", href: "/dashboard/team", icon: iconMap["Anggota"] },
@@ -201,6 +200,7 @@ export default function Sidebar() {
 
         // 1. Tambah core modules
         (res?.core_modules || []).forEach((m) => {
+          if (m.module_name === "Task" || m.module_name === "Tugas") return;
           items.push({
             label: m.module_name,
             href: hrefMap[m.module_name] || "/dashboard",
@@ -210,6 +210,7 @@ export default function Sidebar() {
 
         // 2. Tambah role modules (dengan tanda isSpecial untuk style aksen per spec 06)
         (res?.role_modules || []).forEach((m) => {
+          if (m.module_name === "Task" || m.module_name === "Tugas") return;
           items.push({
             label: m.module_name,
             href: hrefMap[m.module_name] || "/dashboard",
@@ -220,12 +221,16 @@ export default function Sidebar() {
 
         // 3. Tambah divisi modules
         (res?.divisi_modules || []).forEach((m) => {
+          if (m.module_name === "Task" || m.module_name === "Tugas") return;
           items.push({
             label: m.module_name,
             href: hrefMap[m.module_name] || "/dashboard",
             icon: iconMap[m.module_name] || iconMap["Home"],
           });
         });
+
+        // Always filter out Task/Tugas
+        items = items.filter((item) => item.label !== "Task" && item.label !== "Tugas");
 
         if (items.length > 0) {
           setNavItems(items);
