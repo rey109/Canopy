@@ -235,19 +235,19 @@ body {
 }
 
 .animate-agenda-add {
-  animation: agendaAdd 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: agendaAdd 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .animate-agenda-delete {
-  animation: agendaDelete 0.25s ease-in forwards;
+  animation: agendaDelete 0.1s ease-in forwards;
 }
 
 .animate-modal-backdrop {
-  animation: modalBackdrop 0.2s ease-out forwards;
+  animation: modalBackdrop 0.1s ease-out forwards;
 }
 
 .animate-modal-pop {
-  animation: modalPop 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: modalPop 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 /* SweetAlert Style Pop Animation */

@@ -136,6 +136,15 @@ export default function DashboardPage() {
       setMonthlyIncome(inc);
       setMonthlyExpense(exp);
 
+      const localProkersCount = (() => {
+        try {
+          const saved = localStorage.getItem("canopy_proker_data");
+          return saved !== null ? JSON.parse(saved).length : 0;
+        } catch {
+          return 0;
+        }
+      })();
+
       const localAgendasCount = (() => {
         try {
           const saved = localStorage.getItem("canopy_schedule_agendas");
@@ -146,8 +155,7 @@ export default function DashboardPage() {
       })();
 
       setStats({
-        prokerCount:
-          prokers.status === "fulfilled" ? prokers.value.prokers?.length || 0 : 0,
+        prokerCount: localProkersCount,
         pendingApprovals: pending.length,
         balance: balance.status === "fulfilled" ? balance.value.saldo : 0,
         meetingCount:

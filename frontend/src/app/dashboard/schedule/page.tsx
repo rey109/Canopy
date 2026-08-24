@@ -72,7 +72,7 @@ export default function SchedulePage() {
     setToast({ title, message, type });
     setTimeout(() => {
       setToast(null);
-    }, 2800);
+    }, 1200);
   };
 
   // Load agendas strictly from localStorage on mount
@@ -125,10 +125,10 @@ export default function SchedulePage() {
 
   // Navigation handlers
   const handlePrevMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, currentDate.getDate()));
   };
   const handleNextMonth = () => {
-    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, currentDate.getDate()));
   };
   const handleToday = () => {
     setCurrentDate(new Date());
@@ -187,7 +187,6 @@ export default function SchedulePage() {
     setNewDescription("");
   };
 
-  // Delete agenda handler
   const handleDeleteAgenda = (id: number | string) => {
     setDeletingId(id);
     setTimeout(() => {
@@ -197,7 +196,7 @@ export default function SchedulePage() {
       setAgendaToDelete(null);
       setDeletingId(null);
       showSwalAlert("Berhasil Dihapus!", "Agenda telah dihapus dari sistem.", "delete");
-    }, 250);
+    }, 100);
   };
 
   // Calendar calculation helpers
@@ -219,6 +218,27 @@ export default function SchedulePage() {
     user?.group_name === "Pembina" ||
     true; // Default enabled for UI demonstration
 
+  // Calculate start of the week (Monday)
+  const getStartOfWeek = (date: Date) => {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    return new Date(d.setDate(diff));
+  };
+  
+  const startOfWeek = getStartOfWeek(currentDate);
+  const endOfWeek = new Date(startOfWeek);
+  endOfWeek.setDate(startOfWeek.getDate() + 6);
+  
+  const weekDays = Array.from({ length: 7 }).map((_, i) => {
+    const d = new Date(startOfWeek);
+    d.setDate(d.getDate() + i);
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const dayName = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"][d.getDay()];
+    const shortMonth = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Ags", "Sep", "Okt", "Nov", "Des"][d.getMonth()];
+    return { day: dayName, date: dateStr, displayDate: `${String(d.getDate()).padStart(2, "0")} ${shortMonth}` };
+  });
+
   return (
     <div className="space-y-6 animate-fade-in text-slate-100 font-sans">
       {/* HEADER SECTION */}
@@ -231,7 +251,7 @@ export default function SchedulePage() {
             Manajemen Kalender & Agenda
           </div>
           <h1 className="text-2xl md:text-3xl font-bold mt-1 text-slate-50">
-            Jadwal Organisasi & BPH
+            Jadwal Organisasi
           </h1>
           <p className="text-slate-400 text-sm mt-0.5">
             Kelola agenda rapat presidium, gladi bersih, dan program kerja pusat secara terstruktur.
@@ -277,12 +297,6 @@ export default function SchedulePage() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
             </svg>
-          </button>
-          <button
-            onClick={handleToday}
-            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-blue-400 rounded-lg ml-1"
-          >
-            Hari Ini
           </button>
         </div>
 
@@ -416,20 +430,12 @@ export default function SchedulePage() {
            ========================================== */
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
           <div className="text-xs font-semibold text-slate-400 mb-2 flex items-center justify-between">
-            <span>Minggu Ke-4 (24 Aug - 30 Aug 2026)</span>
+            <span>Minggu Ini ({startOfWeek.getDate()} {monthNames[startOfWeek.getMonth()].slice(0,3)} - {endOfWeek.getDate()} {monthNames[endOfWeek.getMonth()].slice(0,3)} {endOfWeek.getFullYear()})</span>
             <span className="text-blue-400">Timeline Agenda Mingguan</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
-            {[
-              { day: "Senin", date: "2026-08-24" },
-              { day: "Selasa", date: "2026-08-25" },
-              { day: "Rabu", date: "2026-08-26" },
-              { day: "Kamis", date: "2026-08-27" },
-              { day: "Jumat", date: "2026-08-28" },
-              { day: "Sabtu", date: "2026-08-29" },
-              { day: "Minggu", date: "2026-08-30" },
-            ].map((dayObj) => {
+            {weekDays.map((dayObj) => {
               const dayAgendas = agendas.filter((a) => a.startDate === dayObj.date);
               return (
                 <div
@@ -441,7 +447,7 @@ export default function SchedulePage() {
                   <div className="border-b border-slate-800 pb-2 flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-200">{dayObj.day}</span>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-slate-500 font-mono">{dayObj.date.slice(8)} Aug</span>
+                      <span className="text-[10px] text-slate-500 font-mono">{dayObj.displayDate}</span>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
