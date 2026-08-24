@@ -243,31 +243,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Quick Access Modules */}
-          <div className="glass-card p-5">
-            <h2 className="text-base font-semibold mb-4">Modul Manajemen</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {[
-                { label: "Proker", href: "/dashboard/proker", icon: "M9 11l3 3L22 4 M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" },
-                { label: "Keuangan", href: "/dashboard/finance", icon: "M12 1v22 M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" },
-                { label: "Rapat", href: "/dashboard/meetings", icon: "M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2 M9 7a4 4 0 100-8 4 4 0 000 8z" },
-                { label: "Aset", href: "/dashboard/assets", icon: "M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" },
-                { label: "Handover", href: "/dashboard/handover", icon: "M17 1l4 4-4 4 M3 11V9a4 4 0 014-4h14 M7 23l-4-4 4-4 M21 13v2a4 4 0 01-4 4H3" },
-                { label: "Public Portal", href: "/dashboard/public", icon: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" },
-              ].map((action) => (
-                <Link
-                  key={action.label}
-                  href={action.href}
-                  className="flex flex-col items-center justify-center p-3 gap-2 rounded-xl border border-[var(--border)] hover:bg-[var(--bg-primary)] hover:border-[var(--border-hover)] transition-all"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--text-muted)]">
-                    <path d={action.icon} />
-                  </svg>
-                  <span className="text-[11px] font-medium">{action.label}</span>
-                </Link>
-              ))}
-            </div>
-          </div>
+
         </div>
 
         {/* Right Column: Timelines, Upcoming, Side widgets */}

@@ -8,6 +8,12 @@ import { api, type ModuleEntry } from "@/lib/api";
 
 // Icon mapper untuk setiap module name
 const iconMap: Record<string, React.ReactNode> = {
+  "Dashboard": (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  ),
   "Home": (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
@@ -91,10 +97,29 @@ const iconMap: Record<string, React.ReactNode> = {
       <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
     </svg>
   ),
+  "Aset": (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
+    </svg>
+  ),
+  "Handover": (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 1l4 4-4 4" />
+      <path d="M3 11V9a4 4 0 014-4h14" />
+      <path d="M7 23l-4-4 4-4" />
+      <path d="M21 13v2a4 4 0 01-4 4H3" />
+    </svg>
+  ),
+  "Public Portal": (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  ),
 };
 
 // URL mapper untuk nama modul
 const hrefMap: Record<string, string> = {
+  "Dashboard": "/dashboard",
   "Home": "/dashboard",
   "Task": "/dashboard/task",
   "Program Kerja": "/dashboard/proker",
@@ -107,7 +132,21 @@ const hrefMap: Record<string, string> = {
   "Member": "/dashboard/team",
   "Profile": "/dashboard/profile",
   "Setting": "/dashboard/settings",
+  "Aset": "/dashboard/assets",
+  "Handover": "/dashboard/handover",
+  "Public Portal": "/dashboard/public",
 };
+
+// Modul Manajemen items (dipindahkan dari dashboard center ke sidebar)
+const modulManajemen: { label: string; key: string }[] = [
+  { label: "Dashboard", key: "Dashboard" },
+  { label: "Proker", key: "Program Kerja" },
+  { label: "Keuangan", key: "Keuangan" },
+  { label: "Rapat", key: "Rapat" },
+  { label: "Aset", key: "Aset" },
+  { label: "Handover", key: "Handover" },
+  { label: "Public Portal", key: "Public Portal" },
+];
 
 interface RenderItem {
   label: string;
@@ -209,6 +248,34 @@ export default function Sidebar() {
             >
               {item.icon}
               {item.label}
+            </Link>
+          );
+        })}
+
+        {/* Separator */}
+        <div className="my-3 px-3">
+          <div className="border-t border-[var(--border)]"></div>
+        </div>
+
+        {/* Modul Manajemen Section */}
+        <div className="px-3 mb-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Modul Manajemen</p>
+        </div>
+        {modulManajemen.map((mod) => {
+          const href = hrefMap[mod.key] || "/dashboard";
+          const icon = iconMap[mod.key] || iconMap["Home"];
+          const isActive =
+            pathname === href ||
+            (href !== "/dashboard" && pathname.startsWith(href));
+
+          return (
+            <Link
+              key={mod.key}
+              href={href}
+              className={`sidebar-link ${isActive ? "active" : ""}`}
+            >
+              {icon}
+              {mod.label}
             </Link>
           );
         })}
