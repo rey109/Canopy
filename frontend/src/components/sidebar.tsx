@@ -185,17 +185,9 @@ export default function Sidebar() {
   useEffect(() => {
     if (!user) return;
 
-    const isTrimitra =
-      user?.group_name === "Trimitra" ||
-      user?.role_name?.toLowerCase().includes("ketua") ||
-      user?.group_name?.toLowerCase().includes("trimitra") ||
-      user?.nis === "20001" ||
-      user?.nis === "20002" ||
-      user?.nis === "20003";
-
     // Default fallback items jika API getNavModules gagal / offline
     const defaultItems: RenderItem[] = [
-      ...(isTrimitra ? [{ label: "Dashboard", href: "/dashboard", icon: iconMap["Dashboard"] }] : []),
+      { label: "Dashboard", href: "/dashboard", icon: iconMap["Dashboard"] },
       { label: "Task", href: "/dashboard/task", icon: iconMap["Task"] },
       { label: "Program Kerja", href: "/dashboard/proker", icon: iconMap["Program Kerja"] },
       { label: "Rapat", href: "/dashboard/meetings", icon: iconMap["Rapat"] },
@@ -209,7 +201,6 @@ export default function Sidebar() {
 
         // 1. Tambah core modules
         (res?.core_modules || []).forEach((m) => {
-          if (!isTrimitra && m.module_name === "Dashboard") return;
           items.push({
             label: m.module_name,
             href: hrefMap[m.module_name] || "/dashboard",
@@ -219,7 +210,6 @@ export default function Sidebar() {
 
         // 2. Tambah role modules (dengan tanda isSpecial untuk style aksen per spec 06)
         (res?.role_modules || []).forEach((m) => {
-          if (!isTrimitra && m.module_name === "Dashboard") return;
           items.push({
             label: m.module_name,
             href: hrefMap[m.module_name] || "/dashboard",
@@ -230,18 +220,12 @@ export default function Sidebar() {
 
         // 3. Tambah divisi modules
         (res?.divisi_modules || []).forEach((m) => {
-          if (!isTrimitra && m.module_name === "Dashboard") return;
           items.push({
             label: m.module_name,
             href: hrefMap[m.module_name] || "/dashboard",
             icon: iconMap[m.module_name] || iconMap["Home"],
           });
         });
-
-        // Ensure Dashboard is removed for non-Trimitra
-        if (!isTrimitra) {
-          items = items.filter(item => item.label !== "Dashboard");
-        }
 
         if (items.length > 0) {
           setNavItems(items);

@@ -43,25 +43,9 @@ const monthNames = [
 ];
 
 export default function DashboardPage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user } = useAuth();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
-
-  // Check if current user is in Trimitra role
-  const isTrimitra =
-    user?.group_name === "Trimitra" ||
-    user?.role_name?.toLowerCase().includes("ketua") ||
-    user?.group_name?.toLowerCase().includes("trimitra") ||
-    user?.nis === "20001" ||
-    user?.nis === "20002" ||
-    user?.nis === "20003";
-
-  // Redirect non-Trimitra users away from Dashboard to Program Kerja page
-  useEffect(() => {
-    if (!authLoading && user && !isTrimitra) {
-      router.replace("/dashboard/proker");
-    }
-  }, [user, authLoading, isTrimitra, router]);
 
   const [stats, setStats] = useState<Stats>({
     prokerCount: 0,
@@ -170,7 +154,7 @@ export default function DashboardPage() {
       setStats({
         prokerCount: actualProkerCount,
         pendingApprovals: pending.length,
-        balance: 0, // Set Kas to 0 (Kas belum diisi)
+        balance: 0, // Kas belum diisi (0)
         meetingCount: meetings.status === "fulfilled" && Array.isArray(meetings.value.rapat) ? meetings.value.rapat.length : 0,
       });
     } catch (e) {
@@ -238,10 +222,6 @@ export default function DashboardPage() {
 
   const selectedAgendas = agendas.filter((a) => a.startDate === currentSelectedDateStr);
 
-  if (!isTrimitra && !authLoading) {
-    return null; // Will redirect in useEffect
-  }
-
   return (
     <div className="animate-fade-in space-y-6 pb-12 text-slate-100 font-sans">
       
@@ -257,7 +237,7 @@ export default function DashboardPage() {
             Dashboard
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-            Selamat datang kembali, <span className="text-blue-400 font-semibold">{user?.nama || "Reyza Fauzi"}</span> ({user?.role_name || "Trimitra"})
+            Selamat datang kembali, <span className="text-blue-400 font-semibold">{user?.nama || "Pengurus OSIS"}</span> ({user?.role_name || user?.group_name || "Anggota"})
           </p>
         </div>
       </div>
@@ -325,7 +305,7 @@ export default function DashboardPage() {
             </div>
           </button>
 
-          {/* Stat Card 3: Saldo Kas (Set to Rp 0 because Kas is not filled yet) */}
+          {/* Stat Card 3: Saldo Kas (Rp 0) */}
           <Link
             href="/dashboard/finance"
             className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-emerald-500/60 rounded-2xl p-5 shadow-lg hover:shadow-emerald-500/5 transition-all group flex flex-col justify-between space-y-4"
@@ -435,7 +415,7 @@ export default function DashboardPage() {
                           {doc.approver_group_name || `Divisi ${idx + 1}`}
                         </td>
                         <td className="py-3.5 px-4 text-slate-300 font-medium">
-                          {user?.nama || "Reyza Fauzi"}
+                          {user?.nama || "Pengurus OSIS"}
                         </td>
                         <td className="py-3.5 px-4">
                           <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
