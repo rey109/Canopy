@@ -254,10 +254,10 @@ type UpsertNotulensiParams struct {
 //encore:api auth path=/rapat/:id/notulensi method=PUT
 func UpsertNotulensi(ctx context.Context, id int, params *UpsertNotulensiParams) (*NotulensiDetail, error) {
 	ud := auth.Data().(*user.UserData)
-	if ud.GroupName != "Sekretaris" {
+	if ud.GroupName != "Sekretaris" && ud.GroupName != "Trimitra" {
 		return nil, &errs.Error{
 			Code:    errs.PermissionDenied,
-			Message: "hanya Sekretaris yang dapat mengisi notulensi",
+			Message: "hanya Sekretaris atau Trimitra yang dapat mengisi notulensi",
 		}
 	}
 

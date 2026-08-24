@@ -69,7 +69,7 @@ export default function MeetingDetailPage() {
   const [updatingStatus, setUpdatingStatus] = useState(false);
 
   const isStaf = user?.group_name === "Staf";
-  const isSekretariat = user?.group_name === "Sekretaris";
+  const isSekretariat = user?.group_name === "Sekretaris" || user?.group_name === "Trimitra";
   const isSekretarisUmum = user?.group_name === "Sekretaris" && user?.level === 1;
   const canEdit = !isStaf;
 
