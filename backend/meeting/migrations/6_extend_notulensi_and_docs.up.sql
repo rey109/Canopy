@@ -1,8 +1,9 @@
--- Migration 4: Extend notulensi dengan field lengkap + tambah tabel dokumentasi + relasi proker ke rapat
+-- Migration 6: Extend notulensi dengan field lengkap + tambah tabel dokumentasi + relasi proker ke rapat + target_role
 
--- Tambah kolom proker_id dan status Dibatalkan ke tabel rapat
+-- Tambah kolom proker_id, target_role dan status Dibatalkan ke tabel rapat
 ALTER TABLE rapat
-    ADD COLUMN IF NOT EXISTS proker_id INT DEFAULT NULL;
+    ADD COLUMN IF NOT EXISTS proker_id INT DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS target_role VARCHAR(50) DEFAULT 'SEMUA SEKBID';
 
 ALTER TABLE rapat DROP CONSTRAINT IF EXISTS chk_rapat_status;
 
