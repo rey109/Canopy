@@ -43,9 +43,25 @@ const monthNames = [
 ];
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+
+  // Check if current user is in Trimitra role
+  const isTrimitra =
+    user?.group_name === "Trimitra" ||
+    user?.role_name?.toLowerCase().includes("ketua") ||
+    user?.group_name?.toLowerCase().includes("trimitra") ||
+    user?.nis === "20001" ||
+    user?.nis === "20002" ||
+    user?.nis === "20003";
+
+  // Redirect non-Trimitra users away from Dashboard to Program Kerja page
+  useEffect(() => {
+    if (!authLoading && user && !isTrimitra) {
+      router.replace("/dashboard/proker");
+    }
+  }, [user, authLoading, isTrimitra, router]);
 
   const [stats, setStats] = useState<Stats>({
     prokerCount: 0,
@@ -154,8 +170,8 @@ export default function DashboardPage() {
       setStats({
         prokerCount: actualProkerCount,
         pendingApprovals: pending.length,
-        balance: balance.status === "fulfilled" ? balance.value.saldo : 15500000,
-        meetingCount: meetings.status === "fulfilled" ? meetings.value.rapat?.length || 5 : 5,
+        balance: 0, // Set Kas to 0 (Kas belum diisi)
+        meetingCount: meetings.status === "fulfilled" && Array.isArray(meetings.value.rapat) ? meetings.value.rapat.length : 0,
       });
     } catch (e) {
       console.error(e);
@@ -222,6 +238,10 @@ export default function DashboardPage() {
 
   const selectedAgendas = agendas.filter((a) => a.startDate === currentSelectedDateStr);
 
+  if (!isTrimitra && !authLoading) {
+    return null; // Will redirect in useEffect
+  }
+
   return (
     <div className="animate-fade-in space-y-6 pb-12 text-slate-100 font-sans">
       
@@ -237,7 +257,7 @@ export default function DashboardPage() {
             Dashboard
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-            Selamat datang kembali, <span className="text-blue-400 font-semibold">{user?.nama || "Reyza Fauzi"}</span> ({user?.role_name || "Chairperson OSIS"})
+            Selamat datang kembali, <span className="text-blue-400 font-semibold">{user?.nama || "Reyza Fauzi"}</span> ({user?.role_name || "Trimitra"})
           </p>
         </div>
       </div>
@@ -305,9 +325,9 @@ export default function DashboardPage() {
             </div>
           </button>
 
-          {/* Stat Card 3: Saldo Kas */}
+          {/* Stat Card 3: Saldo Kas (Set to Rp 0 because Kas is not filled yet) */}
           <Link
-            href="/dashboard/meetings"
+            href="/dashboard/finance"
             className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-emerald-500/60 rounded-2xl p-5 shadow-lg hover:shadow-emerald-500/5 transition-all group flex flex-col justify-between space-y-4"
           >
             <div className="flex items-center justify-between">
@@ -323,9 +343,9 @@ export default function DashboardPage() {
             </div>
             <div>
               <div className="flex items-baseline gap-2">
-                <span className="text-xl font-extrabold text-white">{formatCurrency(stats.balance)}</span>
+                <span className="text-xl font-extrabold text-white">{formatCurrency(0)}</span>
               </div>
-              <p className="text-[11px] text-slate-400 mt-1">Total Organisasi</p>
+              <p className="text-[11px] text-slate-400 mt-1">Belum Ada Kas Masuk</p>
             </div>
           </Link>
 
