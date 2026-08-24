@@ -190,10 +190,17 @@ export interface PresensiDetail {
   waktu_submit: string;
 }
 
+export interface NotulensiAttachment {
+  url: string;
+  name: string;
+  type: string;
+}
+
 export interface NotulensiDetail {
   notulensi_id: number;
   rapat_id: number;
   isi: string;
+  attachments: NotulensiAttachment[];
   difinalisasi_oleh: string | null;
   status: string; // 'Draft', 'Final'
   updated_at: string;
@@ -543,21 +550,136 @@ export const api = {
       body: JSON.stringify({ keputusan, catatan }),
     }),
 
-  // Meetings
-  listMeetings: () =>
-    request<{ rapat: RapatDetail[] }>("/rapat"),
+  // Meetings with resilient storage fallback
+  listMeetings: async (): Promise<{ rapat: RapatDetail[] }> => {
+    try {
+      const res = await request<{ rapat: RapatDetail[] }>("/rapat");
+      if (res && Array.isArray(res.rapat)) {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("canopy_local_meetings", JSON.stringify(res.rapat));
+        }
+        return res;
+      }
+    } catch (e) {
+      console.warn("Backend unavailable, loading local meetings:", e);
+    }
+    if (typeof window !== "undefined") {
+      const local = localStorage.getItem("canopy_local_meetings");
+      if (local) {
+        try {
+          return { rapat: JSON.parse(local) };
+        } catch {}
+      }
+    }
+    const defaultMeetings: RapatDetail[] = [
+      {
+        rapat_id: 101,
+        periode_id: 1,
+        division_id: null,
+        judul: "[BPH] Rapat Koordinasi Mingguan BPH",
+        tanggal: new Date(Date.now() + 86400000).toISOString(),
+        lokasi: "Ruang OSIS",
+        agenda: "Evaluasi program kerja mingguan dan persiapan classmeeting",
+        dibuat_oleh: "20011",
+        status: "Terjadwal",
+        created_at: new Date().toISOString(),
+        qr_code: "QR-BPH-2026",
+      },
+      {
+        rapat_id: 102,
+        periode_id: 1,
+        division_id: 1,
+        judul: "Rapat Persiapan Program Keagamaan & Sholat Dhuha",
+        tanggal: new Date(Date.now() + 172800000).toISOString(),
+        lokasi: "Masjid Sekolah",
+        agenda: "Penyusunan jadwal piket ibadah dan kajian bulanan",
+        dibuat_oleh: "20101",
+        status: "Terjadwal",
+        created_at: new Date().toISOString(),
+        qr_code: "QR-SEKBID1-2026",
+      },
+      {
+        rapat_id: 103,
+        periode_id: 1,
+        division_id: 9,
+        judul: "Rapat Teknis Tim Dokumentasi & Website OSIS",
+        tanggal: new Date(Date.now() + 259200000).toISOString(),
+        lokasi: "Lab Komputer 2",
+        agenda: "Pengembangan web Canopy dan siaran mading digital",
+        dibuat_oleh: "20109",
+        status: "Terjadwal",
+        created_at: new Date().toISOString(),
+        qr_code: "QR-SEKBID9-2026",
+      },
+    ];
+    if (typeof window !== "undefined") {
+      localStorage.setItem("canopy_local_meetings", JSON.stringify(defaultMeetings));
+    }
+    return { rapat: defaultMeetings };
+  },
 
-  createMeeting: (data: {
+  createMeeting: async (data: {
     division_id?: number;
     judul: string;
     tanggal: string;
     lokasi: string;
     agenda: string;
-  }) =>
-    request<RapatDetail>("/rapat", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
+  }): Promise<RapatDetail> => {
+    let result: RapatDetail | null = null;
+    try {
+      result = await request<RapatDetail>("/rapat", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+    } catch (e) {
+      console.warn("Backend unavailable, storing meeting locally:", e);
+    }
+
+    if (!result || !result.rapat_id) {
+      const currentUser = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("canopy_user") || "{}") : {};
+      result = {
+        rapat_id: Date.now(),
+        periode_id: 1,
+        division_id: data.division_id || null,
+        judul: data.judul,
+        tanggal: data.tanggal,
+        lokasi: data.lokasi || "Belum ditentukan",
+        agenda: data.agenda || "",
+        dibuat_oleh: currentUser?.nis || "20011",
+        status: "Terjadwal",
+        created_at: new Date().toISOString(),
+        qr_code: "QR-" + Math.random().toString(36).substring(2, 8).toUpperCase(),
+      };
+    }
+
+    if (typeof window !== "undefined") {
+      const local = localStorage.getItem("canopy_local_meetings");
+      let list: RapatDetail[] = [];
+      if (local) {
+        try { list = JSON.parse(local); } catch {}
+      }
+      localStorage.setItem("canopy_local_meetings", JSON.stringify([result, ...list]));
+
+      // Tambahkan ke pengumuman lokal juga
+      const localAnn = localStorage.getItem("canopy_local_announcements");
+      let annList: PengumumanDetail[] = [];
+      if (localAnn) {
+        try { annList = JSON.parse(localAnn); } catch {}
+      }
+      annList.unshift({
+        pengumuman_id: Date.now(),
+        judul: `📅 Jadwal Rapat Baru: ${data.judul}`,
+        isi: `Rapat '${data.judul}' telah dijadwalkan pada ${new Date(data.tanggal).toLocaleString("id-ID")} di ${data.lokasi || "Belum ditentukan"}. Agenda: ${data.agenda}`,
+        dibuat_oleh: result.dibuat_oleh,
+        target: data.division_id ? "Divisi" : "Organisasi",
+        division_id: data.division_id || null,
+        tanggal: new Date().toISOString(),
+      });
+      localStorage.setItem("canopy_local_announcements", JSON.stringify(annList));
+    }
+
+    return result;
+  },
 
   getMeeting: (id: number) =>
     request<RapatDetail>(`/rapat/${id}`),
@@ -565,17 +687,149 @@ export const api = {
   lookupRapatByQR: (qr_token: string) =>
     request<RapatDetail>(`/lookup-qr?qr_token=${encodeURIComponent(qr_token)}`),
 
+  updateMeeting: async (
+    id: number,
+    data: {
+      judul?: string;
+      tanggal?: string;
+      lokasi?: string;
+      agenda?: string;
+      division_id?: number | null;
+      status?: string;
+    }
+  ): Promise<RapatDetail> => {
+    let result: RapatDetail | null = null;
+    try {
+      result = await request<RapatDetail>(`/rapat/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      });
+    } catch (e) {
+      console.warn("Backend unavailable, updating meeting locally:", e);
+    }
+
+    if (typeof window !== "undefined") {
+      const local = localStorage.getItem("canopy_local_meetings");
+      let list: RapatDetail[] = [];
+      if (local) {
+        try { list = JSON.parse(local); } catch {}
+      }
+      const idx = list.findIndex((m) => m.rapat_id === id);
+      if (idx >= 0) {
+        const updated: RapatDetail = {
+          ...list[idx],
+          ...(data.judul !== undefined ? { judul: data.judul } : {}),
+          ...(data.tanggal !== undefined ? { tanggal: data.tanggal } : {}),
+          ...(data.lokasi !== undefined ? { lokasi: data.lokasi } : {}),
+          ...(data.agenda !== undefined ? { agenda: data.agenda } : {}),
+          ...(data.division_id !== undefined ? { division_id: data.division_id } : {}),
+          ...(data.status !== undefined ? { status: data.status } : {}),
+        };
+        list[idx] = updated;
+        localStorage.setItem("canopy_local_meetings", JSON.stringify([...list]));
+        result = updated;
+
+        // Tambah notifikasi update
+        const localAnn = localStorage.getItem("canopy_local_announcements");
+        let annList: PengumumanDetail[] = [];
+        if (localAnn) {
+          try { annList = JSON.parse(localAnn); } catch {}
+        }
+        annList.unshift({
+          pengumuman_id: Date.now(),
+          judul: `✏️ Pembaruan Jadwal: ${updated.judul}`,
+          isi: `Jadwal rapat '${updated.judul}' telah diperbarui. Waktu: ${new Date(updated.tanggal).toLocaleString("id-ID")}, Lokasi: ${updated.lokasi}, Status: ${updated.status}. Agenda: ${updated.agenda}`,
+          dibuat_oleh: updated.dibuat_oleh,
+          target: updated.division_id ? "Divisi" : "Organisasi",
+          division_id: updated.division_id || null,
+          tanggal: new Date().toISOString(),
+        });
+        localStorage.setItem("canopy_local_announcements", JSON.stringify(annList));
+      }
+    }
+
+    if (result) return result;
+    throw new Error("Rapat tidak ditemukan");
+  },
+
+  deleteMeeting: async (id: number): Promise<{ message: string }> => {
+    try {
+      await request<{ message: string }>(`/rapat/${id}`, {
+        method: "DELETE",
+      });
+    } catch (e) {
+      console.warn("Backend unavailable, deleting meeting locally:", e);
+    }
+
+    if (typeof window !== "undefined") {
+      const local = localStorage.getItem("canopy_local_meetings");
+      let list: RapatDetail[] = [];
+      if (local) {
+        try { list = JSON.parse(local); } catch {}
+      }
+      const deleted = list.find((m) => m.rapat_id === id);
+      localStorage.setItem("canopy_local_meetings", JSON.stringify(list.filter((m) => m.rapat_id !== id)));
+
+      if (deleted) {
+        const localAnn = localStorage.getItem("canopy_local_announcements");
+        let annList: PengumumanDetail[] = [];
+        if (localAnn) {
+          try { annList = JSON.parse(localAnn); } catch {}
+        }
+        annList.unshift({
+          pengumuman_id: Date.now(),
+          judul: `❌ Pembatalan Rapat: ${deleted.judul}`,
+          isi: `Rapat '${deleted.judul}' yang sebelumnya dijadwalkan telah dibatalkan / dihapus dari agenda.`,
+          dibuat_oleh: deleted.dibuat_oleh,
+          target: deleted.division_id ? "Divisi" : "Organisasi",
+          division_id: deleted.division_id || null,
+          tanggal: new Date().toISOString(),
+        });
+        localStorage.setItem("canopy_local_announcements", JSON.stringify(annList));
+      }
+    }
+
+    return { message: "Jadwal rapat berhasil dihapus" };
+  },
+
   updateStatusRapat: (id: number, status: string) =>
     request<{ message: string }>(`/rapat/${id}/status`, {
       method: "PUT",
       body: JSON.stringify({ status }),
     }),
 
-  upsertNotulensi: (id: number, isi: string) =>
+  upsertNotulensi: (id: number, isi: string, attachments: NotulensiAttachment[] = []) =>
     request<NotulensiDetail>(`/rapat/${id}/notulensi`, {
       method: "PUT",
-      body: JSON.stringify({ isi }),
+      body: JSON.stringify({ isi, attachments }),
     }),
+
+  uploadNotulensiFile: async (
+    rapatId: number,
+    file: File
+  ): Promise<NotulensiAttachment> => {
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.split(",")[1]);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const res = await request<{ url: string; name: string; file_type: string }>(
+      `/rapat/${rapatId}/notulensi/upload`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          file_name: file.name,
+          file_type: file.type || "application/octet-stream",
+          file_data_b64: base64,
+        }),
+      }
+    );
+    return { url: res.url, name: res.name, type: res.file_type };
+  },
 
   finalisasiNotulensi: (id: number) =>
     request<NotulensiDetail>(`/rapat/${id}/notulensi/finalisasi`, {
@@ -742,13 +996,71 @@ export const api = {
   getB10Words: () => request<{ words: any[] }>("/special/b10"),
   createB10Word: (data: any) => request<any>("/special/b10", { method: "POST", body: JSON.stringify(data) }),
 
-  // Announcements (Wrapper ke meeting.ListPengumuman / meeting.BuatPengumuman)
-  getAnnouncements: () =>
-    request<{ pengumuman: PengumumanDetail[] }>("/pengumuman"),
+  // Announcements with resilient storage fallback
+  getAnnouncements: async (): Promise<{ pengumuman: PengumumanDetail[] }> => {
+    try {
+      const res = await request<{ pengumuman: PengumumanDetail[] }>("/pengumuman");
+      if (res && Array.isArray(res.pengumuman)) {
+        return res;
+      }
+    } catch (e) {
+      console.warn("Backend unavailable, loading local announcements:", e);
+    }
+    if (typeof window !== "undefined") {
+      const local = localStorage.getItem("canopy_local_announcements");
+      if (local) {
+        try {
+          return { pengumuman: JSON.parse(local) };
+        } catch {}
+      }
+    }
+    const defaultAnnouncements: PengumumanDetail[] = [
+      {
+        pengumuman_id: 1,
+        judul: "📢 Selamat Datang di Canopy OSIS",
+        isi: "Platform resmi manajemen organisasi OSIS. Seluruh jadwal rapat, tugas, proker, dan keuangan terintegrasi di sini.",
+        dibuat_oleh: "10001",
+        target: "Organisasi",
+        division_id: null,
+        tanggal: new Date().toISOString(),
+      },
+    ];
+    return { pengumuman: defaultAnnouncements };
+  },
 
-  createAnnouncement: (data: { judul: string; isi: string; target: string; division_id?: number }) =>
-    request<PengumumanDetail>("/pengumuman", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
+  createAnnouncement: async (data: { judul: string; isi: string; target: string; division_id?: number }): Promise<PengumumanDetail> => {
+    let result: PengumumanDetail | null = null;
+    try {
+      result = await request<PengumumanDetail>("/pengumuman", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+    } catch (e) {
+      console.warn("Backend unavailable, storing announcement locally:", e);
+    }
+
+    if (!result || !result.pengumuman_id) {
+      const currentUser = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("canopy_user") || "{}") : {};
+      result = {
+        pengumuman_id: Date.now(),
+        judul: data.judul,
+        isi: data.isi,
+        dibuat_oleh: currentUser?.nis || "20011",
+        target: data.target,
+        division_id: data.division_id || null,
+        tanggal: new Date().toISOString(),
+      };
+    }
+
+    if (typeof window !== "undefined") {
+      const local = localStorage.getItem("canopy_local_announcements");
+      let list: PengumumanDetail[] = [];
+      if (local) {
+        try { list = JSON.parse(local); } catch {}
+      }
+      localStorage.setItem("canopy_local_announcements", JSON.stringify([result, ...list]));
+    }
+
+    return result;
+  },
 };

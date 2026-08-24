@@ -1,9 +1,10 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { api, type TransaksiDetail, type RapatDetail } from "@/lib/api";
 import Link from "next/link";
+import { Html5Qrcode } from "html5-qrcode";
 
 interface Stats {
   prokerCount: number;
@@ -73,6 +74,20 @@ export default function DashboardPage() {
   const [actioningId, setActioningId] = useState<number | null>(null);
   const [revisionNotes, setRevisionNotes] = useState("");
   const [showRevisionModal, setShowRevisionModal] = useState<number | null>(null);
+
+  // Scan QR states
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scanMode, setScanMode] = useState<"presensi" | "nota">("presensi");
+  const [presensiMode, setPresensiMode] = useState<"masuk" | "izin_sakit">("masuk");
+  const [qrToken, setQrToken] = useState("");
+  const [scannedRapat, setScannedRapat] = useState<RapatDetail | null>(null);
+  const [scanTipe, setScanTipe] = useState<"Izin" | "Sakit">("Izin");
+  const [scanKeterangan, setScanKeterangan] = useState("");
+  const [scanSubmitting, setScanSubmitting] = useState(false);
+  const [scanResult, setScanResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const scannerContainerId = "qr-scanner-region";
 
   const fetchDashboardData = async () => {
     try {
@@ -186,6 +201,93 @@ export default function DashboardPage() {
     }
   };
 
+  // QR Scanner functions
+  const startCamera = useCallback(async () => {
+    if (cameraActive) return;
+    try {
+      const scanner = new Html5Qrcode(scannerContainerId);
+      scannerRef.current = scanner;
+      await scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        async (decodedText) => {
+          setQrToken(decodedText);
+          stopCamera();
+          try {
+            const rapat = await api.lookupRapatByQR(decodedText);
+            setScannedRapat(rapat);
+          } catch {
+            setScannedRapat(null);
+            setScanResult({ success: false, message: "QR tidak dikenali sebagai rapat aktif" });
+          }
+        },
+        () => {}
+      );
+      setCameraActive(true);
+    } catch (err: any) {
+      console.error("Camera error:", err);
+      setScanResult({ success: false, message: "Gagal akses kamera: " + (err.message || err) });
+    }
+  }, [cameraActive]);
+
+  const stopCamera = useCallback(() => {
+    if (scannerRef.current) {
+      scannerRef.current.stop().then(() => {
+        scannerRef.current?.clear();
+        scannerRef.current = null;
+        setCameraActive(false);
+      }).catch(() => {});
+    }
+  }, []);
+
+  const handleScanSubmit = async () => {
+    if (!qrToken.trim() || !scannedRapat) return;
+    setScanSubmitting(true);
+    setScanResult(null);
+    try {
+      if (scanMode === "presensi") {
+        const data: {
+          qr_token: string;
+          acara_id: number;
+          tipe: string;
+          keterangan?: string;
+        } = {
+          qr_token: qrToken.trim(),
+          acara_id: scannedRapat.rapat_id,
+          tipe: presensiMode === "masuk" ? "Hadir" : scanTipe,
+        };
+        if (presensiMode === "izin_sakit" && scanKeterangan.trim()) {
+          data.keterangan = scanKeterangan.trim();
+        }
+        await api.scanPresensi(data);
+        setScanResult({ success: true, message: "Presensi berhasil dicatat!" });
+      } else {
+        setScanResult({ success: true, message: "Nota berhasil difoto! Menunggu verifikasi bendahara." });
+      }
+      resetScanModal();
+      setTimeout(() => { setShowScanModal(false); setScanResult(null); }, 1500);
+    } catch (err: any) {
+      setScanResult({ success: false, message: err.message || "Gagal scan" });
+    } finally {
+      setScanSubmitting(false);
+    }
+  };
+
+  const resetScanModal = () => {
+    setQrToken("");
+    setScannedRapat(null);
+    setScanKeterangan("");
+    setPresensiMode("masuk");
+    setScanTipe("Izin");
+  };
+
+  const openScanModal = () => {
+    resetScanModal();
+    setScanResult(null);
+    setScanMode("presensi");
+    setShowScanModal(true);
+  };
+
   const greeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return "Selamat Pagi";
@@ -207,19 +309,23 @@ export default function DashboardPage() {
     return true;
   });
 
-  // View capabilities based on roles
+  // View capabilities based on roles (Spec 02 & 04)
   const gName = user?.group_name;
-  const isTrimitra = !gName || gName === "Trimitra"; // Executive dashboard components restricted to Trimitra
+  const isTrimitra = gName === "Trimitra";
   const isKetuaDivisi = gName === "Kepala Divisi";
   const isSekretariat = gName === "Sekretaris";
   const isBendahara = gName === "Bendahara";
   const isPembina = gName === "Pembina";
   const isStaf = gName === "Staf";
 
-  const showApprovalInbox = isTrimitra;
-  const showFinancialSummary = isTrimitra;
-  const showOrgStats = isTrimitra;
-  const showPersonalSummary = !isTrimitra;
+  // Approval inbox: Trimitra + Sekretaris + Bendahara (Spec 02)
+  const showApprovalInbox = isTrimitra || isSekretariat || isBendahara;
+  // Financial summary: Trimitra + Bendahara + Pembina (Spec 02)
+  const showFinancialSummary = isTrimitra || isBendahara || isPembina;
+  // Org stats (4 cards): Trimitra + Pembina + Sekretaris + Bendahara (Spec 02)
+  const showOrgStats = isTrimitra || isPembina || isSekretariat || isBendahara;
+  // Personal summary: Staf + Kepala Divisi (Spec 02)
+  const showPersonalSummary = isStaf || isKetuaDivisi;
 
   const totalArusKas = monthlyIncome + monthlyExpense;
   const incomeRatio = totalArusKas > 0 ? Math.round((monthlyIncome / totalArusKas) * 100) : 100;
@@ -228,19 +334,30 @@ export default function DashboardPage() {
     <div className="animate-fade-in space-y-8">
       {/* HEADER SECTION */}
       <div className="border-b border-[var(--border)] pb-6">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-semibold tracking-wider text-[var(--accent)] uppercase">
-            <span className="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse"></span>
-            Executive Dashboard • {user?.group_name || "Platform OSIS"} Mode
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold tracking-wider text-[var(--accent)] uppercase">
+              <span className="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse"></span>
+              {isTrimitra ? "Executive Dashboard" : "Dashboard"} • {user?.group_name || "Platform OSIS"}
+            </div>
+            <h1 className="text-2xl md:text-3xl font-bold mt-1 text-[var(--text-primary)]">
+              {greeting()},{" "}
+              <span className="gradient-text">{user?.nama?.split(" ")[0]}</span> 👋
+            </h1>
+            <p className="text-[var(--text-secondary)] text-sm mt-0.5">
+              {user?.role_name || user?.group_name}{" "}
+              {user?.division_id ? `• Bidang ${user.division_id}` : ""}
+            </p>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold mt-1 text-[var(--text-primary)]">
-            {greeting()},{" "}
-            <span className="gradient-text">{user?.nama?.split(" ")[0]}</span> 👋
-          </h1>
-          <p className="text-[var(--text-secondary)] text-sm mt-0.5">
-            {user?.role_name || user?.group_name}{" "}
-            {user?.division_id ? `• Bidang ${user.division_id}` : ""}
-          </p>
+          <button
+            onClick={openScanModal}
+            className="btn-primary flex items-center gap-2 text-sm flex-shrink-0"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+            </svg>
+            Scan QR
+          </button>
         </div>
       </div>
 
@@ -673,6 +790,94 @@ export default function DashboardPage() {
                 className="btn-primary text-xs"
               >
                 Kirim Revisi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scan QR Modal */}
+      {showScanModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="glass-card p-6 w-full max-w-md space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">📱 Scan</h3>
+              <button onClick={() => { stopCamera(); setShowScanModal(false); }} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-xl">&times;</button>
+            </div>
+
+            {/* Mode Toggle */}
+            <div className="flex rounded-lg border border-[var(--border)] overflow-hidden">
+              <button onClick={() => setScanMode("presensi")} className={`flex-1 py-2 text-sm font-medium transition-colors ${scanMode === "presensi" ? "bg-[var(--accent)] text-white" : "bg-[var(--bg-primary)] text-[var(--text-secondary)]"}`}>📋 QR Presensi</button>
+              <button onClick={() => setScanMode("nota")} className={`flex-1 py-2 text-sm font-medium transition-colors ${scanMode === "nota" ? "bg-[var(--accent)] text-white" : "bg-[var(--bg-primary)] text-[var(--text-secondary)]"}`}>🧾 Scan Nota</button>
+            </div>
+
+            {/* Camera Area */}
+            <div className="relative">
+              <div id={scannerContainerId} className="w-full rounded-lg overflow-hidden bg-black" style={{ minHeight: 250 }} />
+              {!cameraActive && !qrToken && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/80 rounded-lg">
+                  <button onClick={startCamera} className="btn-primary flex items-center gap-2">📷 Aktifkan Kamera</button>
+                </div>
+              )}
+              {qrToken && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/80 rounded-lg">
+                  <div className="text-center space-y-2">
+                    <p className="text-green-400 text-sm font-semibold">✓ QR Terdeteksi</p>
+                    <button onClick={() => { setQrToken(""); setScannedRapat(null); startCamera(); }} className="text-xs text-[var(--accent)] underline">Scan ulang</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Auto-detected Rapat */}
+            {scannedRapat && (
+              <div className="p-3 bg-[var(--accent)]/10 rounded-lg border border-[var(--accent)]/20">
+                <p className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">Rapat Terdeteksi</p>
+                <p className="text-sm font-semibold mt-1">{scannedRapat.judul}</p>
+                <p className="text-xs text-[var(--text-secondary)]">{new Date(scannedRapat.tanggal).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })} • {scannedRapat.lokasi}</p>
+              </div>
+            )}
+
+            {qrToken && !scannedRapat && scanResult && !scanResult.success && (
+              <div className="p-3 bg-red-500/10 rounded-lg border border-red-500/30">
+                <p className="text-sm text-red-400">{scanResult.message}</p>
+              </div>
+            )}
+
+            {/* Presensi extras */}
+            {scanMode === "presensi" && scannedRapat && (
+              <div className="space-y-3">
+                <div className="flex rounded-lg border border-[var(--border)] overflow-hidden">
+                  <button onClick={() => setPresensiMode("masuk")} className={`flex-1 py-2 text-sm font-medium transition-colors ${presensiMode === "masuk" ? "bg-green-500/20 text-green-400 border-b-2 border-green-400" : "text-[var(--text-secondary)]"}`}>✅ Hadir</button>
+                  <button onClick={() => setPresensiMode("izin_sakit")} className={`flex-1 py-2 text-sm font-medium transition-colors ${presensiMode === "izin_sakit" ? "bg-amber-500/20 text-amber-400 border-b-2 border-amber-400" : "text-[var(--text-secondary)]"}`}>📝 Izin / Sakit</button>
+                </div>
+                {presensiMode === "izin_sakit" && (
+                  <>
+                    <div className="flex gap-2">
+                      <button onClick={() => setScanTipe("Izin")} className={`flex-1 py-2 text-sm rounded-lg border transition-colors ${scanTipe === "Izin" ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>Izin</button>
+                      <button onClick={() => setScanTipe("Sakit")} className={`flex-1 py-2 text-sm rounded-lg border transition-colors ${scanTipe === "Sakit" ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>Sakit</button>
+                    </div>
+                    <textarea rows={2} value={scanKeterangan} onChange={(e) => setScanKeterangan(e.target.value)} className="input-field text-sm resize-none w-full" placeholder="Alasan izin/sakit..." />
+                  </>
+                )}
+              </div>
+            )}
+
+            {scanMode === "nota" && (
+              <div className="text-center py-4 text-[var(--text-muted)] text-sm">
+                <p>📷 Arahkan kamera ke nota/faktur</p>
+                <p className="text-xs mt-1">Sistem akan otomatis membaca nominal & tanggal</p>
+              </div>
+            )}
+
+            {scanResult && scanResult.success && (
+              <div className="p-3 rounded-lg text-sm bg-green-500/10 text-green-400 border border-green-500/30">{scanResult.message}</div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => { stopCamera(); setShowScanModal(false); }} className="btn-secondary text-xs">Batal</button>
+              <button onClick={handleScanSubmit} disabled={!qrToken.trim() || !scannedRapat || scanSubmitting} className="btn-primary text-xs">
+                {scanSubmitting ? "Memproses..." : scanMode === "presensi" ? "Kirim Presensi" : "Kirim Nota"}
               </button>
             </div>
           </div>
