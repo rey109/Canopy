@@ -4,10 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"encore.dev/beta/auth"
@@ -521,6 +525,12 @@ type UploadNotulensiFileResponse struct {
 	FileType string `json:"file_type"`
 }
 
+// maxNotulensiFileBytes — batas ukuran file lampiran (10 MB)
+const maxNotulensiFileBytes = 10 << 20
+
+// UploadNotulensiFile — simpan file/foto lampiran notulensi secara permanen.
+// Mengembalikan URL relatif /notulensi-files/<token> yang dapat dipakai untuk
+// preview maupun download tanpa header Authorization.
 //encore:api auth path=/rapat/:id/notulensi/upload method=POST
 func UploadNotulensiFile(ctx context.Context, id int, params *UploadNotulensiFileParams) (*UploadNotulensiFileResponse, error) {
 	ud := auth.Data().(*user.UserData)
@@ -533,14 +543,188 @@ func UploadNotulensiFile(ctx context.Context, id int, params *UploadNotulensiFil
 	if params.FileName == "" || params.FileDataB64 == "" {
 		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "file_name dan file_data_b64 wajib diisi"}
 	}
+	if len(params.FileDataB64) > base64.StdEncoding.EncodedLen(maxNotulensiFileBytes) {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "ukuran file terlalu besar (maksimal 10 MB)"}
+	}
 
-	dataURL := fmt.Sprintf("data:%s;base64,%s", params.FileType, params.FileDataB64)
+	// Buang prefix data URL jika ada (data:<type>;base64,)
+	b64 := params.FileDataB64
+	if idx := strings.Index(b64, ","); idx >= 0 && strings.HasPrefix(b64, "data:") {
+		b64 = b64[idx+1:]
+	}
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		if data2, err2 := base64.RawStdEncoding.DecodeString(strings.TrimRight(b64, "=")); err2 == nil {
+			data = data2
+		} else {
+			return nil, &errs.Error{Code: errs.InvalidArgument, Message: "file_data_b64 bukan base64 yang valid"}
+		}
+	}
+	if len(data) == 0 {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "file kosong"}
+	}
+	if len(data) > maxNotulensiFileBytes {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "ukuran file terlalu besar (maksimal 10 MB)"}
+	}
+
+	// Pastikan rapat ada
+	var exists bool
+	if err := db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM rapat WHERE rapat_id = $1)`, id).Scan(&exists); err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if !exists {
+		return nil, &errs.Error{Code: errs.NotFound, Message: "rapat tidak ditemukan"}
+	}
+
+	tokenBytes := make([]byte, 16)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: "gagal generate token file"}
+	}
+	token := hex.EncodeToString(tokenBytes)
+
+	fileType := params.FileType
+	if fileType == "" {
+		fileType = "application/octet-stream"
+	}
+
+	var fileID int64
+	err = db.QueryRow(ctx, `
+		INSERT INTO notulensi_files (rapat_id, token, file_name, file_type, file_size, content)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING file_id
+	`, id, token, params.FileName, fileType, len(data), data).Scan(&fileID)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
 
 	return &UploadNotulensiFileResponse{
-		URL:      dataURL,
+		URL:      fmt.Sprintf("/notulensi-files/%s", token),
 		Name:     params.FileName,
-		FileType: params.FileType,
+		FileType: fileType,
 	}, nil
+}
+
+// ServeNotulensiFile — endpoint publik (tanpa auth header) untuk menampilkan /
+// mengunduh lampiran notulensi via token unik yang tidak dapat ditebak.
+//encore:api public raw method=GET path=/notulensi-files/*token
+func ServeNotulensiFile(w http.ResponseWriter, req *http.Request) {
+	token := strings.TrimPrefix(req.URL.Path, "/notulensi-files/")
+	token = strings.Trim(token, "/")
+	if token == "" {
+		http.Error(w, "token tidak valid", http.StatusBadRequest)
+		return
+	}
+
+	var fileName, fileType string
+	var content []byte
+	err := db.QueryRow(req.Context(), `
+		SELECT file_name, file_type, content FROM notulensi_files WHERE token = $1
+	`, token).Scan(&fileName, &fileType, &content)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "file tidak ditemukan", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "gagal mengambil file", http.StatusInternalServerError)
+		return
+	}
+
+	if fileType == "" {
+		fileType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", fileType)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	disposition := "attachment"
+	if strings.HasPrefix(fileType, "image/") || fileType == "application/pdf" || fileType == "text/plain" {
+		disposition = "inline"
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename*=UTF-8''%s", disposition, urlPathEscape(fileName)))
+	_, _ = w.Write(content)
+}
+
+func urlPathEscape(s string) string {
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
+}
+
+// ============================================================
+// DAFTAR SEMUA NOTULENSI (modul manajemen)
+// ============================================================
+
+type NotulensiListItem struct {
+	NotulensiID      int                   `json:"notulensi_id"`
+	RapatID          int                   `json:"rapat_id"`
+	JudulRapat       string                `json:"judul_rapat"`
+	TanggalRapat     time.Time             `json:"tanggal_rapat"`
+	LokasiRapat      string                `json:"lokasi_rapat"`
+	StatusRapat      string                `json:"status_rapat"`
+	DivisionID       *int                  `json:"division_id"`
+	DibuatOleh       string                `json:"dibuat_oleh"`
+	Isi              string                `json:"isi"`
+	Attachments      []NotulensiAttachment `json:"attachments"`
+	Status           string                `json:"status"`
+	DifinalisasiOleh *string               `json:"difinalisasi_oleh"`
+	UpdatedAt        time.Time             `json:"updated_at"`
+}
+
+type ListNotulensiResponse struct {
+	Notulensi []NotulensiListItem `json:"notulensi"`
+}
+
+// ListNotulensi — arsip seluruh notulensi rapat yang dapat dilihat user.
+//encore:api auth path=/notulensi method=GET
+func ListNotulensi(ctx context.Context) (*ListNotulensiResponse, error) {
+	ud := auth.Data().(*user.UserData)
+
+	baseQuery := `
+		SELECT n.notulensi_id, n.rapat_id, r.judul, r.tanggal, r.lokasi, r.status,
+		       r.division_id, r.dibuat_oleh, n.isi, n.attachments, n.status,
+		       n.difinalisasi_oleh, n.updated_at
+		FROM notulensi n
+		JOIN rapat r ON r.rapat_id = n.rapat_id
+	`
+	var rows *sqldb.Rows
+	var err error
+	if ud.HasScopeAll() {
+		rows, err = db.Query(ctx, baseQuery+` ORDER BY r.tanggal DESC`)
+	} else {
+		rows, err = db.Query(ctx, baseQuery+`
+			WHERE r.division_id IS NULL OR r.division_id = $1
+			ORDER BY r.tanggal DESC
+		`, ud.DivisionID)
+	}
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	defer rows.Close()
+
+	list := []NotulensiListItem{}
+	for rows.Next() {
+		var it NotulensiListItem
+		var divID sql.NullInt32
+		var retFinalisasi sql.NullString
+		var attachStr string
+		if err := rows.Scan(
+			&it.NotulensiID, &it.RapatID, &it.JudulRapat, &it.TanggalRapat, &it.LokasiRapat,
+			&it.StatusRapat, &divID, &it.DibuatOleh, &it.Isi, &attachStr, &it.Status,
+			&retFinalisasi, &it.UpdatedAt,
+		); err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+		if divID.Valid {
+			v := int(divID.Int32)
+			it.DivisionID = &v
+		}
+		if retFinalisasi.Valid {
+			it.DifinalisasiOleh = &retFinalisasi.String
+		}
+		it.Attachments = []NotulensiAttachment{}
+		_ = json.Unmarshal([]byte(attachStr), &it.Attachments)
+		list = append(list, it)
+	}
+	return &ListNotulensiResponse{Notulensi: list}, nil
 }
 
 // ============================================================

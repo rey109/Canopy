@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, type RapatDetail, type UserDetail, type DivisionDetail, type ProkerDetail, type NotulensiAttachment } from "@/lib/api";
+import { api, fileUrl, type RapatDetail, type UserDetail, type DivisionDetail, type ProkerDetail, type NotulensiAttachment } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
 interface AttendanceEntry {
@@ -359,18 +359,44 @@ export default function MeetingsPage() {
     }, 1500);
   };
 
+  // Kompres foto di browser agar upload ringan dan tidak melebihi batas server
+  const compressImageFile = async (file: File): Promise<File> => {
+    if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
+    try {
+      const bitmap = await createImageBitmap(file);
+      const maxDim = 1600;
+      const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+      if (scale === 1 && file.size <= 1.5 * 1024 * 1024) return file;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return file;
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), "image/jpeg", 0.82)
+      );
+      bitmap.close?.();
+      if (!blob || blob.size >= file.size) return file;
+      return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+    } catch {
+      return file;
+    }
+  };
+
   const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!notulensiMeeting || !e.target.files?.length) return;
-    const file = e.target.files[0];
+    const original = e.target.files[0];
+    if (original.size > 10 * 1024 * 1024) {
+      alert("Ukuran file maksimal 10 MB.");
+      e.target.value = "";
+      return;
+    }
     setUploadingFile(true);
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      const att: NotulensiAttachment = { url: dataUrl, name: file.name, type: file.type || "application/octet-stream" };
+      const file = await compressImageFile(original);
+      const uploaded = await api.uploadNotulensiFile(notulensiMeeting.rapat_id, file);
+      const att: NotulensiAttachment = { url: uploaded.url, name: uploaded.name, type: uploaded.type };
       const newAttachments = [...notulensiAttachments, att];
       setNotulensiAttachments(newAttachments);
       await api.upsertNotulensi(notulensiMeeting.rapat_id, notulensiIsi, newAttachments);
@@ -713,14 +739,14 @@ export default function MeetingsPage() {
                     return (
                       <div key={idx} className="flex items-center gap-2 p-2 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)]">
                         {isImage ? (
-                          <img src={att.url} alt={att.name} className="w-10 h-10 object-cover rounded" />
+                          <img src={fileUrl(att.url)} alt={att.name} className="w-10 h-10 object-cover rounded" />
                         ) : (
                           <div className="w-10 h-10 flex items-center justify-center rounded bg-[var(--bg-secondary)] text-lg">
                             📄
                           </div>
                         )}
                         <a
-                          href={att.url}
+                          href={fileUrl(att.url)}
                           download={att.name}
                           target="_blank"
                           rel="noreferrer"
