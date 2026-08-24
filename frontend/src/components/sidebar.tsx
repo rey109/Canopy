@@ -102,6 +102,15 @@ const iconMap: Record<string, React.ReactNode> = {
       <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
     </svg>
   ),
+  "Notulensi": (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+      <polyline points="10 9 9 9 8 9" />
+    </svg>
+  ),
   "Handover": (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M17 1l4 4-4 4" />
@@ -135,6 +144,7 @@ const hrefMap: Record<string, string> = {
   "Aset": "/dashboard/assets",
   "Handover": "/dashboard/handover",
   "Public Portal": "/dashboard/public",
+  "Notulensi": "/dashboard/manajemen/notulensi",
 };
 
 // Modul Manajemen items (dipindahkan dari dashboard center ke sidebar)
@@ -143,6 +153,7 @@ const modulManajemen: { label: string; key: string }[] = [
   { label: "Proker", key: "Program Kerja" },
   { label: "Keuangan", key: "Keuangan" },
   { label: "Rapat", key: "Rapat" },
+  { label: "Notulensi & Dok", key: "Notulensi" },
   { label: "Aset", key: "Aset" },
   { label: "Handover", key: "Handover" },
   { label: "Public Portal", key: "Public Portal" },

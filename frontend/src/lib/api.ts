@@ -167,12 +167,13 @@ export interface RapatDetail {
   rapat_id: number;
   periode_id: number;
   division_id: number | null;
+  proker_id: number | null;
   judul: string;
   tanggal: string;
   lokasi: string;
   agenda: string;
   dibuat_oleh: string;
-  status: string; // 'Terjadwal', 'Berlangsung', 'Selesai'
+  status: string; // 'Terjadwal', 'Berlangsung', 'Selesai', 'Dibatalkan'
   qr_code?: string;
   created_at: string;
 }
@@ -194,8 +195,40 @@ export interface NotulensiDetail {
   notulensi_id: number;
   rapat_id: number;
   isi: string;
+  tempat: string;
+  pimpinan_rapat: string;
+  notulis: string;
+  peserta: string;
+  agenda_pembahasan: string;
+  hasil_pembahasan: string;
+  keputusan_rapat: string;
+  tindak_lanjut: string;
+  pic: string;
+  deadline_tl: string | null;
+  catatan_tambahan: string;
   difinalisasi_oleh: string | null;
   status: string; // 'Draft', 'Final'
+  updated_at: string;
+}
+
+export interface DokumentasiDetail {
+  dok_id: number;
+  rapat_id: number;
+  file_url: string;
+  diunggah_oleh: string;
+  keterangan: string;
+  created_at: string;
+}
+
+export interface NotulensiListItem {
+  notulensi_id: number;
+  rapat_id: number;
+  judul_rapat: string;
+  tanggal_rapat: string;
+  division_id: number | null;
+  proker_id: number | null;
+  notulis: string;
+  status: string;
   updated_at: string;
 }
 
@@ -549,6 +582,7 @@ export const api = {
 
   createMeeting: (data: {
     division_id?: number;
+    proker_id?: number;
     judul: string;
     tanggal: string;
     lokasi: string;
@@ -571,10 +605,23 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 
-  upsertNotulensi: (id: number, isi: string) =>
+  upsertNotulensi: (id: number, data: {
+    isi: string;
+    tempat: string;
+    pimpinan_rapat: string;
+    notulis: string;
+    peserta: string;
+    agenda_pembahasan: string;
+    hasil_pembahasan: string;
+    keputusan_rapat: string;
+    tindak_lanjut: string;
+    pic: string;
+    deadline_tl?: string;
+    catatan_tambahan: string;
+  }) =>
     request<NotulensiDetail>(`/rapat/${id}/notulensi`, {
       method: "PUT",
-      body: JSON.stringify({ isi }),
+      body: JSON.stringify(data),
     }),
 
   finalisasiNotulensi: (id: number) =>
@@ -584,6 +631,23 @@ export const api = {
 
   getNotulensi: (id: number) =>
     request<NotulensiDetail>(`/rapat/${id}/notulensi`),
+
+  listAllNotulensi: () =>
+    request<{ notulensi: NotulensiListItem[] }>("/notulensi"),
+
+  addDokumentasi: (id: number, data: { file_url: string; keterangan: string }) =>
+    request<DokumentasiDetail>(`/rapat/${id}/dokumentasi`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  listDokumentasi: (id: number) =>
+    request<{ dokumentasi: DokumentasiDetail[] }>(`/rapat/${id}/dokumentasi`),
+
+  deleteDokumentasi: (dok_id: number) =>
+    request<{ message: string }>(`/rapat/dokumentasi/${dok_id}`, {
+      method: "DELETE",
+    }),
 
   scanPresensi: (data: {
     qr_token: string;

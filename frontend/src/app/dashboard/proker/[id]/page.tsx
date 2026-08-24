@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import { api, type ProkerDetail, type TaskDetail, type TransaksiDetail, type DokumenDetail, type PresensiDetail, type UserDetail } from "@/lib/api";
+import { api, type ProkerDetail, type TaskDetail, type TransaksiDetail, type DokumenDetail, type PresensiDetail, type UserDetail, type RapatDetail, type NotulensiDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
 
@@ -21,9 +21,11 @@ export default function ProkerDetailPage({ params }: PageProps) {
   const [attendance, setAttendance] = useState<PresensiDetail[]>([]);
   const [users, setUsers] = useState<UserDetail[]>([]);
   const [loading, setLoading] = useState(true);
+  const [meetings, setMeetings] = useState<RapatDetail[]>([]);
+  const [notulensis, setNotulensis] = useState<Record<number, NotulensiDetail>>({});
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<"overview" | "tasks" | "finance" | "docs" | "presensi">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "tasks" | "finance" | "docs" | "meetings">("overview");
 
   // Overview Note Form (Pembina only)
   const [coachingNote, setCoachingNote] = useState("");
@@ -40,13 +42,14 @@ export default function ProkerDetailPage({ params }: PageProps) {
 
   const fetchDetailData = async () => {
     try {
-      const [pRes, tRes, txRes, dRes, uRes, nRes] = await Promise.allSettled([
+      const [pRes, tRes, txRes, dRes, uRes, nRes, mRes] = await Promise.allSettled([
         api.getProker(prokerId),
         api.listTasks(),
         api.listTransactions(),
         api.listDokumen(),
         api.listUsers(),
         api.listCatatanPembinaan(prokerId),
+        api.listMeetings(),
       ]);
 
       if (pRes.status === "fulfilled") setProker(pRes.value);
@@ -64,6 +67,25 @@ export default function ProkerDetailPage({ params }: PageProps) {
       }
       if (nRes.status === "fulfilled") {
         setNotesList(nRes.value.catatan || []);
+      }
+
+      if (mRes.status === "fulfilled") {
+        const filteredMeetings = mRes.value.rapat.filter(m => m.proker_id === prokerId) || [];
+        setMeetings(filteredMeetings);
+
+        // Fetch notulensi for each meeting
+        const notesMap: Record<number, NotulensiDetail> = {};
+        await Promise.all(
+          filteredMeetings.map(async (m) => {
+            try {
+              const note = await api.getNotulensi(m.rapat_id);
+              notesMap[m.rapat_id] = note;
+            } catch {
+              // Notulensi belum ada, abaikan
+            }
+          })
+        );
+        setNotulensis(notesMap);
       }
     } catch (e) {
       console.error(e);
@@ -188,7 +210,7 @@ export default function ProkerDetailPage({ params }: PageProps) {
 
       {/* Sub-tab Navigation */}
       <div className="flex border-b border-[var(--border)] overflow-x-auto">
-        {(["overview", "tasks", "finance", "docs", "presensi"] as const).map((tab) => (
+        {(["overview", "tasks", "finance", "docs", "meetings"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -198,7 +220,7 @@ export default function ProkerDetailPage({ params }: PageProps) {
                 : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             }`}
           >
-            {tab === "docs" ? "Dokumen" : tab}
+            {tab === "docs" ? "Dokumen" : tab === "meetings" ? "Rapat & Notulensi" : tab}
           </button>
         ))}
       </div>
@@ -408,10 +430,74 @@ export default function ProkerDetailPage({ params }: PageProps) {
         </div>
       )}
 
-      {/* Tab: Presensi */}
-      {activeTab === "presensi" && (
-        <div className="glass-card p-6 text-center text-[var(--text-muted)]">
-          <p className="text-sm">Rekap absensi kegiatan hari-H program kerja dapat diakses melalui modul presensi rapat/kegiatan.</p>
+      {/* Tab: Meetings */}
+      {activeTab === "meetings" && (
+        <div className="glass-card p-6 space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-base font-semibold">Rapat & Kegiatan Terkait</h2>
+            <Link href="/dashboard/meetings" className="btn-primary text-xs py-1.5 px-3">
+              + Jadwalkan Rapat
+            </Link>
+          </div>
+          {meetings.length === 0 ? (
+            <p className="text-xs text-[var(--text-muted)] text-center py-12">Belum ada rapat terkait program kerja ini.</p>
+          ) : (
+            <div className="space-y-4">
+              {meetings.map((m) => {
+                const note = notulensis[m.rapat_id];
+                return (
+                  <div key={m.rapat_id} className="p-4 bg-[var(--bg-primary)] rounded-lg border border-[var(--border)] space-y-3">
+                    <div className="flex justify-between items-start gap-2">
+                      <div>
+                        <h3 className="font-semibold text-sm">{m.judul}</h3>
+                        <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                          📅 {new Date(m.tanggal).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })} | 📍 {m.lokasi || "—"}
+                        </p>
+                      </div>
+                      <span className={`badge text-xs ${m.status === "Selesai" ? "badge-success" : m.status === "Berlangsung" ? "badge-info" : m.status === "Dibatalkan" ? "badge-error" : "badge-neutral"}`}>
+                        {m.status}
+                      </span>
+                    </div>
+
+                    {note ? (
+                      <div className="border-t border-[var(--border)] pt-2 mt-2 space-y-2">
+                        <div className="flex justify-between items-center">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">📝 Notulensi ({note.status})</p>
+                          <Link href={`/dashboard/meetings/${m.rapat_id}`} className="text-xs text-[var(--accent)] hover:underline">
+                            Lihat Selengkapnya
+                          </Link>
+                        </div>
+                        {note.keputusan_rapat && (
+                          <div className="text-xs">
+                            <p className="font-medium text-[var(--text-secondary)]">Keputusan Rapat:</p>
+                            <p className="whitespace-pre-wrap text-[var(--text-muted)]">{note.keputusan_rapat}</p>
+                          </div>
+                        )}
+                        {note.tindak_lanjut && (
+                          <div className="text-xs">
+                            <p className="font-medium text-[var(--text-secondary)]">Tindak Lanjut:</p>
+                            <p className="whitespace-pre-wrap text-[var(--text-muted)]">{note.tindak_lanjut}</p>
+                          </div>
+                        )}
+                        {note.pic && (
+                          <p className="text-[10px] text-[var(--text-muted)]">
+                            PIC: <span className="font-semibold">{note.pic}</span> {note.deadline_tl ? `| Deadline: ${note.deadline_tl}` : ""}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex justify-between items-center border-t border-[var(--border)] pt-2 text-xs text-[var(--text-muted)]">
+                        <span>Belum ada notulensi.</span>
+                        <Link href={`/dashboard/meetings/${m.rapat_id}`} className="text-xs text-[var(--accent)] hover:underline">
+                          Tulis Notulensi
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
