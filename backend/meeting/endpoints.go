@@ -335,10 +335,12 @@ type ListPresensiResponse struct {
 }
 
 // LookupRapatByQR — cari rapat berdasarkan QR token (dipanggil setelah kamera scan)
-//encore:api auth path=/rapat/lookup-qr method=GET
-func LookupRapatByQR(ctx context.Context, params struct {
+type LookupQRParams struct {
 	QRToken string `query:"qr_token"`
-}) (*RapatDetail, error) {
+}
+
+//encore:api auth path=/lookup-qr method=GET
+func LookupRapatByQR(ctx context.Context, params *LookupQRParams) (*RapatDetail, error) {
 	var r RapatDetail
 	var retDivID sql.NullInt32
 	var retQR sql.NullString

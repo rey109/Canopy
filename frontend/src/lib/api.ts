@@ -563,7 +563,7 @@ export const api = {
     request<RapatDetail>(`/rapat/${id}`),
 
   lookupRapatByQR: (qr_token: string) =>
-    request<RapatDetail>(`/rapat/lookup-qr?qr_token=${encodeURIComponent(qr_token)}`),
+    request<RapatDetail>(`/lookup-qr?qr_token=${encodeURIComponent(qr_token)}`),
 
   updateStatusRapat: (id: number, status: string) =>
     request<{ message: string }>(`/rapat/${id}/status`, {
