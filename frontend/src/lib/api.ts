@@ -182,9 +182,20 @@ export interface DokumentasiDetail {
   dok_id: number;
   rapat_id: number;
   file_url: string;
+  nama_file: string;
+  tipe_file: string;
+  ukuran: number;
   diunggah_oleh: string;
   keterangan: string;
   created_at: string;
+}
+
+export interface AddDokumentasiPayload {
+  file_url: string; // URL eksternal ATAU data-URL base64 (disimpan persistent di DB)
+  nama_file: string;
+  tipe_file: string;
+  ukuran: number;
+  keterangan?: string;
 }
 
 export interface NotulensiListItem {
@@ -671,10 +682,17 @@ export const api = {
   listAllNotulensi: () =>
     request<{ notulensi: NotulensiListItem[] }>("/notulensi"),
 
-  addDokumentasi: (id: number, data: { file_url: string; keterangan: string }) =>
+  addDokumentasi: (id: number, data: AddDokumentasiPayload) =>
     request<DokumentasiDetail>(`/rapat/${id}/dokumentasi`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  // Upload banyak dokumentasi sekaligus — atomik di backend (satu gagal = semua batal)
+  addBatchDokumentasi: (id: number, files: AddDokumentasiPayload[]) =>
+    request<{ dokumentasi: DokumentasiDetail[] }>(`/rapat/${id}/dokumentasi/batch`, {
+      method: "POST",
+      body: JSON.stringify({ files }),
     }),
 
   listDokumentasi: (id: number) =>
