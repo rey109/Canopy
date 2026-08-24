@@ -244,31 +244,33 @@ export default function MemberPage() {
     return "bg-blue-500/15 text-blue-400 border border-blue-500/30";
   };
 
-  // Filter Logic (Search Name/NIS, Divisi, Angkatan, Role)
-  const filteredMembers = members.filter((m) => {
-    const matchName =
-      searchName === "" ||
-      m.nama.toLowerCase().includes(searchName.toLowerCase()) ||
-      m.nis.includes(searchName);
+  // Filter & Sort Logic (Search Name/NIS, Divisi, Angkatan, Role + Sort A-Z by Nama)
+  const filteredMembers = members
+    .filter((m) => {
+      const matchName =
+        searchName === "" ||
+        m.nama.toLowerCase().includes(searchName.toLowerCase()) ||
+        m.nis.includes(searchName);
 
-    const divName = (m.division_name || "").toLowerCase().trim();
-    const selDivNorm = selectedDivisi.toLowerCase().trim();
-    const matchDivisi =
-      selectedDivisi === "All" ||
-      divName === selDivNorm ||
-      divName.startsWith(selDivNorm + " ") ||
-      divName.startsWith(selDivNorm + " -");
+      const divName = (m.division_name || "").toLowerCase().trim();
+      const selDivNorm = selectedDivisi.toLowerCase().trim();
+      const matchDivisi =
+        selectedDivisi === "All" ||
+        divName === selDivNorm ||
+        divName.startsWith(selDivNorm + " ") ||
+        divName.startsWith(selDivNorm + " -");
 
-    const matchAngkatan =
-      selectedAngkatan === "All" || m.tahun_masuk === parseInt(selectedAngkatan, 10);
+      const matchAngkatan =
+        selectedAngkatan === "All" || m.tahun_masuk === parseInt(selectedAngkatan, 10);
 
-    const roleName = (m.role_name || m.group_name || "").toLowerCase().trim();
-    const selRoleNorm = selectedRole.toLowerCase().trim();
-    const matchRole =
-      selectedRole === "All" || roleName === selRoleNorm;
+      const roleName = (m.role_name || m.group_name || "").toLowerCase().trim();
+      const selRoleNorm = selectedRole.toLowerCase().trim();
+      const matchRole =
+        selectedRole === "All" || roleName === selRoleNorm;
 
-    return matchName && matchDivisi && matchAngkatan && matchRole;
-  });
+      return matchName && matchDivisi && matchAngkatan && matchRole;
+    })
+    .sort((a, b) => a.nama.localeCompare(b.nama, "id", { sensitivity: "base" }));
 
   // Access Control: Only Sekretaris / Sekre can add or delete members
   const gName = (user?.group_name || "").toLowerCase();
