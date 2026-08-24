@@ -2,8 +2,10 @@
 
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { api, type TransaksiDetail, type RapatDetail } from "@/lib/api";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 interface Stats {
   prokerCount: number;
@@ -23,73 +25,104 @@ interface PendingApproval {
   urgency?: "Urgent" | "High" | "Normal";
 }
 
-interface SavedAgenda {
+export interface Agenda {
   id: number | string;
   title: string;
-  category: string;
-  startDate: string;
-  startTime: string;
-  endTime: string;
+  startDate: string; // YYYY-MM-DD
+  startTime: string; // HH:mm
+  endTime: string;   // HH:mm
   location: string;
+  isOnline: boolean;
+  description: string;
+  createdBy: string;
 }
+
+const monthNames = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+];
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+
   const [stats, setStats] = useState<Stats>({
     prokerCount: 0,
     pendingApprovals: 0,
     balance: 0,
     meetingCount: 0,
   });
+
   const [pendingList, setPendingList] = useState<PendingApproval[]>([]);
   const [meetingList, setMeetingList] = useState<RapatDetail[]>([]);
-  const [savedAgendas, setSavedAgendas] = useState<SavedAgenda[]>([]);
   const [loading, setLoading] = useState(true);
-  const [myTasksCount, setMyTasksCount] = useState(0);
-  const [monthlyIncome, setMonthlyIncome] = useState(0);
-  const [monthlyExpense, setMonthlyExpense] = useState(0);
-  const [activeFilter, setActiveFilter] = useState<"All" | "Urgent">("All");
-
-  // Load saved agendas from localStorage
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("canopy_schedule_agendas");
-      if (saved) {
-        const parsed: SavedAgenda[] = JSON.parse(saved);
-        const cleaned = parsed.filter(
-          (item) => item.title && !item.title.toUpperCase().includes("LEFI")
-        );
-        setSavedAgendas(cleaned);
-        if (cleaned.length !== parsed.length) {
-          localStorage.setItem("canopy_schedule_agendas", JSON.stringify(cleaned));
-        }
-      }
-    } catch (e) {
-      console.error("Failed to load saved agendas on dashboard", e);
-    }
-  }, []);
 
   // Approval modal states
   const [actioningId, setActioningId] = useState<number | null>(null);
   const [revisionNotes, setRevisionNotes] = useState("");
   const [showRevisionModal, setShowRevisionModal] = useState<number | null>(null);
 
+  // SweetAlert & Confirmation States
+  const [agendaToDelete, setAgendaToDelete] = useState<Agenda | null>(null);
+  const [toast, setToast] = useState<{ type: "success" | "delete"; title: string; message: string } | null>(null);
+
+  // Dynamic Calendar State (Default: August 2026)
+  const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date(2026, 7, 24));
+  const [selectedDay, setSelectedDay] = useState<number>(24);
+
+  // All Agendas stored in array
+  const [agendas, setAgendas] = useState<Agenda[]>([]);
+
+  const currentYear = currentCalendarDate.getFullYear();
+  const currentMonthIndex = currentCalendarDate.getMonth();
+
+  // Dynamic calculation for Days in Month & Start Day Offset (Monday = 0)
+  const daysInMonth = new Date(currentYear, currentMonthIndex + 1, 0).getDate();
+  const rawFirstDay = new Date(currentYear, currentMonthIndex, 1).getDay(); // 0 = Sun
+  const startDayOffset = (rawFirstDay + 6) % 7; // Mon = 0, Tue = 1, ..., Sun = 6
+
+  // Key generator for date comparison: "YYYY-MM-DD"
+  const getDateStr = (y: number, m: number, d: number) => {
+    return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  };
+
+  const currentSelectedDateStr = getDateStr(currentYear, currentMonthIndex, selectedDay);
+
+  const showSwalToast = (title: string, message: string, type: "success" | "delete" = "success") => {
+    setToast({ title, message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 1200);
+  };
+
+  // Load Agendas from localStorage
+  const loadAgendas = () => {
+    try {
+      const saved = localStorage.getItem("canopy_schedule_agendas");
+      if (saved !== null) {
+        setAgendas(JSON.parse(saved));
+      } else {
+        setAgendas([]);
+      }
+    } catch {
+      setAgendas([]);
+    }
+  };
+
   const fetchDashboardData = async () => {
     try {
-      const [prokers, approvals, balance, meetings, tasks, txs] =
+      const [prokers, approvals, balance, meetings] =
         await Promise.allSettled([
           api.listProkers(),
           api.listPendingApprovals(),
           api.getBalance(),
           api.listMeetings(),
-          api.listTasks(),
-          api.listTransactions(),
         ]);
 
       const rawPending =
         approvals.status === "fulfilled" ? approvals.value.persetujuan || [] : [];
 
-      // Assign dynamic urgency markers for UI demo & clear priority visualization
       const pending: PendingApproval[] = rawPending.map((item, idx) => ({
         ...item,
         urgency: idx === 0 ? "Urgent" : idx % 2 === 0 ? "High" : "Normal",
@@ -101,69 +134,28 @@ export default function DashboardPage() {
         setMeetingList(meetings.value.rapat || []);
       }
 
-      // Hitung task saya yang belum selesai
-      let myTasks = 0;
-      if (tasks.status === "fulfilled" && user) {
-        myTasks = tasks.value.tasks.filter(
-          (t) => t.assigned_to === user.nis && t.status !== "Selesai"
-        ).length;
-      }
-      setMyTasksCount(myTasks);
-
-      // Hitung pemasukan/pengeluaran bulan ini
-      let inc = 0;
-      let exp = 0;
-      if (txs.status === "fulfilled") {
-        const now = new Date();
-        const currentMonth = now.getMonth();
-        const currentYear = now.getFullYear();
-
-        txs.value.transaksi.forEach((t: TransaksiDetail) => {
-          const tDate = new Date(t.tanggal);
-          if (
-            tDate.getMonth() === currentMonth &&
-            tDate.getFullYear() === currentYear &&
-            t.status === "Disetujui"
-          ) {
-            if (t.jenis === "Masuk") {
-              inc += t.nominal;
-            } else {
-              exp += t.nominal;
-            }
-          }
-        });
-      }
-      setMonthlyIncome(inc);
-      setMonthlyExpense(exp);
-
+      // Calculate REAL proker count from localStorage (defaults strictly to 0 if empty)
       const localProkersCount = (() => {
         try {
           const saved = localStorage.getItem("canopy_proker_data");
-          return saved !== null ? JSON.parse(saved).length : 0;
+          if (saved !== null) {
+            const parsed = JSON.parse(saved);
+            return Array.isArray(parsed) ? parsed.length : 0;
+          }
+          return 0;
         } catch {
           return 0;
         }
       })();
 
-      const localAgendasCount = (() => {
-        try {
-          const saved = localStorage.getItem("canopy_schedule_agendas");
-          return saved ? JSON.parse(saved).length : 0;
-        } catch {
-          return 0;
-        }
-      })();
+      const apiProkerCount = prokers.status === "fulfilled" && Array.isArray(prokers.value.prokers) ? prokers.value.prokers.length : 0;
+      const actualProkerCount = Math.max(apiProkerCount, localProkersCount);
 
       setStats({
-        prokerCount: localProkersCount,
+        prokerCount: actualProkerCount,
         pendingApprovals: pending.length,
-        balance: balance.status === "fulfilled" ? balance.value.saldo : 0,
-        meetingCount:
-          localAgendasCount > 0
-            ? localAgendasCount
-            : meetings.status === "fulfilled"
-            ? meetings.value.rapat?.length || 0
-            : 0,
+        balance: 0, // Kas belum diisi (0)
+        meetingCount: meetings.status === "fulfilled" && Array.isArray(meetings.value.rapat) ? meetings.value.rapat.length : 0,
       });
     } catch (e) {
       console.error(e);
@@ -173,7 +165,9 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
+    setMounted(true);
     fetchDashboardData();
+    loadAgendas();
   }, [user]);
 
   const handleApprovalAction = async (
@@ -194,11 +188,28 @@ export default function DashboardPage() {
     }
   };
 
-  const greeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return "Selamat Pagi";
-    if (hour < 17) return "Selamat Siang";
-    return "Selamat Malam";
+  // Month Navigation Handlers
+  const handlePrevMonth = () => {
+    setCurrentCalendarDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+    setSelectedDay(1);
+  };
+
+  const handleNextMonth = () => {
+    setCurrentCalendarDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+    setSelectedDay(1);
+  };
+
+  // Confirmed Delete Agenda
+  const handleConfirmDelete = () => {
+    if (!agendaToDelete) return;
+    const updated = agendas.filter((a) => a.id !== agendaToDelete.id);
+    setAgendas(updated);
+    try {
+      localStorage.setItem("canopy_schedule_agendas", JSON.stringify(updated));
+    } catch {}
+
+    setAgendaToDelete(null);
+    showSwalToast("Berhasil Dihapus!", "Agenda telah berhasil dihapus.", "delete");
   };
 
   const formatCurrency = (val: number) => {
@@ -209,467 +220,454 @@ export default function DashboardPage() {
     }).format(val);
   };
 
-  // Filtered pending list based on urgency filter
-  const filteredPending = pendingList.filter((doc) => {
-    if (activeFilter === "Urgent") return doc.urgency === "Urgent";
-    return true;
-  });
-
-  // View capabilities based on roles
-  const gName = user?.group_name;
-  const isTrimitra = !gName || gName === "Trimitra"; // Executive dashboard components restricted to Trimitra
-  const isKetuaDivisi = gName === "Kepala Divisi";
-  const isSekretariat = gName === "Sekretaris";
-  const isBendahara = gName === "Bendahara";
-  const isPembina = gName === "Pembina";
-  const isStaf = gName === "Staf";
-
-  const showApprovalInbox = isTrimitra;
-  const showFinancialSummary = isTrimitra;
-  const showOrgStats = isTrimitra;
-  const showPersonalSummary = !isTrimitra;
-
-  const totalArusKas = monthlyIncome + monthlyExpense;
-  const incomeRatio = totalArusKas > 0 ? Math.round((monthlyIncome / totalArusKas) * 100) : 100;
+  const selectedAgendas = agendas.filter((a) => a.startDate === currentSelectedDateStr);
 
   return (
-    <div className="animate-fade-in space-y-8">
-      {/* HEADER SECTION */}
-      <div className="border-b border-[var(--border)] pb-6">
+    <div className="animate-fade-in space-y-6 pb-12 text-slate-100 font-sans">
+      
+      {/* TOP BREADCRUMB & HEADER */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-5">
         <div>
-          <div className="flex items-center gap-2 text-xs font-semibold tracking-wider text-[var(--accent)] uppercase">
-            <span className="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse"></span>
-            Executive Dashboard • {user?.group_name || "Platform OSIS"} Mode
+          <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
+            <span>Manajemen OSIS</span>
+            <span>&gt;</span>
+            <span className="text-blue-400 font-bold">Dashboard</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold mt-1 text-[var(--text-primary)]">
-            {greeting()},{" "}
-            <span className="gradient-text">{user?.nama?.split(" ")[0]}</span> 👋
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white mt-1">
+            Dashboard
           </h1>
-          <p className="text-[var(--text-secondary)] text-sm mt-0.5">
-            {user?.role_name || user?.group_name}{" "}
-            {user?.division_id ? `• Bidang ${user.division_id}` : ""}
+          <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+            Selamat datang kembali, <span className="text-blue-400 font-semibold">{user?.nama || "Pengurus OSIS"}</span> ({user?.role_name || user?.group_name || "Anggota"})
           </p>
         </div>
       </div>
 
-      {/* 1. TOP SUMMARY STAT CARDS (GRID 4 KOLOM) */}
-      {showOrgStats && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {/* CARD 1: Program Kerja */}
-          <div className="relative group bg-[var(--bg-secondary)] hover:bg-[var(--bg-card-hover)] border border-[var(--border)] hover:border-blue-500/50 rounded-2xl p-5 transition-all duration-300 shadow-lg">
+      {/* EXECUTIVE SUMMARY GRID (4 KPI CARDS ROW) */}
+      <div className="space-y-3">
+        <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+          Executive Summary Grid
+        </h2>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          {/* Stat Card 1: Program Kerja */}
+          <Link
+            href="/dashboard/proker"
+            className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-blue-500/60 rounded-2xl p-5 shadow-lg hover:shadow-blue-500/5 transition-all group flex flex-col justify-between space-y-4"
+          >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                Program Kerja
-              </span>
-              <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                </svg>
-              </div>
-            </div>
-            <div className="mt-3">
-              {loading ? (
-                <div className="h-8 w-16 bg-[var(--border)] rounded animate-pulse" />
-              ) : (
-                <span className="text-3xl font-extrabold text-[var(--text-primary)]">
-                  {stats.prokerCount}
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center font-bold text-xs">
+                  📋
+                </div>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  PROGRAM KERJA
                 </span>
-              )}
-              <p className="text-xs text-[var(--text-muted)] mt-1">
-                Program aktif terdaftar
+              </div>
+              <span className="text-slate-500 group-hover:text-blue-400 transition-colors text-xs font-bold">→</span>
+            </div>
+            <div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-extrabold text-white">{stats.prokerCount}</span>
+                <span className="text-xs font-semibold text-slate-400">Active</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                {stats.prokerCount > 0 ? `${stats.prokerCount} Program Kerja Tersimpan` : "Belum Ada Program Kerja"}
               </p>
             </div>
-          </div>
+          </Link>
 
-          {/* CARD 2: Persetujuan Pending */}
-          <div className="relative group bg-[var(--bg-secondary)] hover:bg-[var(--bg-card-hover)] border border-[var(--border)] hover:border-amber-500/50 rounded-2xl p-5 transition-all duration-300 shadow-lg">
+          {/* Stat Card 2: Pending Approval */}
+          <button
+            onClick={() => {
+              const el = document.getElementById("approval-section");
+              if (el) el.scrollIntoView({ behavior: "smooth" });
+            }}
+            className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-purple-500/60 rounded-2xl p-5 shadow-lg hover:shadow-purple-500/5 transition-all group text-left flex flex-col justify-between space-y-4 cursor-pointer"
+          >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                Persetujuan Pending
-              </span>
-              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 group-hover:scale-110 transition-transform">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-            </div>
-            <div className="mt-3 flex items-baseline justify-between">
-              <div>
-                {loading ? (
-                  <div className="h-8 w-16 bg-[var(--border)] rounded animate-pulse" />
-                ) : (
-                  <span className="text-3xl font-extrabold text-amber-400">
-                    {stats.pendingApprovals}
-                  </span>
-                )}
-                <p className="text-xs text-[var(--text-muted)] mt-1">Dokumen butuh persetujuan</p>
-              </div>
-              {pendingList.length > 0 && (
-                <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 animate-pulse">
-                  Action Needed
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center font-bold text-xs">
+                  📄
+                </div>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  PENDING APPROVAL
                 </span>
-              )}
+              </div>
+              <span className="text-slate-500 group-hover:text-purple-400 transition-colors text-xs font-bold">→</span>
             </div>
-          </div>
+            <div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-extrabold text-white">{pendingList.length}</span>
+                <span className="text-xs font-semibold text-rose-400">Urgent</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Proposals &amp; Letters</p>
+            </div>
+          </button>
 
-          {/* CARD 3: Saldo Kas (Read-Only) */}
-          <div className="relative group bg-[var(--bg-secondary)] hover:bg-[var(--bg-card-hover)] border border-[var(--border)] hover:border-emerald-500/50 rounded-2xl p-5 transition-all duration-300 shadow-lg">
+          {/* Stat Card 3: Saldo Kas (Rp 0) */}
+          <Link
+            href="/dashboard/finance"
+            className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-emerald-500/60 rounded-2xl p-5 shadow-lg hover:shadow-emerald-500/5 transition-all group flex flex-col justify-between space-y-4"
+          >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                Saldo Kas
-              </span>
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-            </div>
-            <div className="mt-3">
-              {loading ? (
-                <div className="h-8 w-28 bg-[var(--border)] rounded animate-pulse" />
-              ) : (
-                <span className="text-2xl lg:text-3xl font-extrabold text-[var(--text-primary)] truncate block">
-                  {formatCurrency(stats.balance)}
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold text-xs">
+                  💵
+                </div>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  SALDO KAS
                 </span>
-              )}
+              </div>
+              <span className="text-slate-500 group-hover:text-emerald-400 transition-colors text-xs font-bold">→</span>
             </div>
-          </div>
+            <div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-xl font-extrabold text-white">{formatCurrency(0)}</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Belum Ada Kas Masuk</p>
+            </div>
+          </Link>
 
-          {/* CARD 4: Total Rapat */}
-          <div className="relative group bg-[var(--bg-secondary)] hover:bg-[var(--bg-card-hover)] border border-[var(--border)] hover:border-purple-500/50 rounded-2xl p-5 transition-all duration-300 shadow-lg">
+          {/* Stat Card 4: Total Rapat */}
+          <Link
+            href="/dashboard/meetings"
+            className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-rose-500/60 rounded-2xl p-5 shadow-lg hover:shadow-rose-500/5 transition-all group flex flex-col justify-between space-y-4"
+          >
             <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                Total Rapat
-              </span>
-              <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 group-hover:scale-110 transition-transform">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-              </div>
-            </div>
-            <div className="mt-3">
-              {loading ? (
-                <div className="h-8 w-16 bg-[var(--border)] rounded animate-pulse" />
-              ) : (
-                <span className="text-3xl font-extrabold text-[var(--text-primary)]">
-                  {stats.meetingCount}
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center font-bold text-xs">
+                  👥
+                </div>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  TOTAL RAPAT
                 </span>
-              )}
-              <p className="text-xs text-[var(--text-muted)] mt-1">
-                Agenda mendatang
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MAIN CONTENT AREA: MAIN WIDGET (KIRI) + SIDE WIDGET (KANAN) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* ==========================================
-            2. MAIN WIDGET: MENUNGGU PERSETUJUAN (70%)
-           ========================================== */}
-        <div className="lg:col-span-2 space-y-6">
-          {showApprovalInbox && (
-            <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-2xl p-6 shadow-xl space-y-6">
-              {/* Header & Filter Controls */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-bold text-[var(--text-primary)] flex items-center gap-2">
-                    <span>📥 Menunggu Persetujuan</span>
-                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                      {pendingList.length} Antrian
-                    </span>
-                  </h2>
-                  <p className="text-xs text-[var(--text-muted)] mt-1">
-                    Dokumen & proposal yang membutuhkan tindakan langsung (Approve/Reject)
-                  </p>
-                </div>
-
-                {/* Filter Tabs */}
-                <div className="flex items-center gap-1.5 bg-[var(--bg-primary)] p-1 rounded-xl border border-[var(--border)] text-xs">
-                  <button
-                    onClick={() => setActiveFilter("All")}
-                    className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                      activeFilter === "All"
-                        ? "bg-[var(--bg-card-hover)] text-[var(--text-primary)] shadow"
-                        : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                    }`}
-                  >
-                    Semua ({pendingList.length})
-                  </button>
-                  <button
-                    onClick={() => setActiveFilter("Urgent")}
-                    className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                      activeFilter === "Urgent"
-                        ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                        : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                    }`}
-                  >
-                    Urgent ({pendingList.filter((d) => d.urgency === "Urgent").length})
-                  </button>
-                </div>
               </div>
-
-              {/* Document Queue List */}
-              {loading ? (
-                <div className="space-y-3 animate-pulse">
-                  <div className="h-16 bg-[var(--border)] rounded-xl" />
-                  <div className="h-16 bg-[var(--border)] rounded-xl" />
-                </div>
-              ) : filteredPending.length === 0 ? (
-                /* EMPTY STATE PER SPEC */
-                <div className="text-center py-12 px-4 border border-dashed border-[var(--border)] rounded-xl bg-[var(--bg-primary)]/40">
-                  <div className="w-14 h-14 mx-auto rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-3">
-                    <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                  <h3 className="text-base font-semibold text-[var(--text-primary)]">
-                    Semua bersih!
-                  </h3>
-                  <p className="text-xs text-[var(--text-muted)] mt-1 max-w-sm mx-auto">
-                    Tidak ada dokumen yang menunggu persetujuan.
-                  </p>
-                </div>
-              ) : (
-                /* LIST ITEMS */
-                <div className="space-y-3">
-                  {filteredPending.map((doc) => (
-                    <div
-                      key={doc.persetujuan_id}
-                      className="group bg-[var(--bg-primary)] hover:bg-[var(--bg-card-hover)] border border-[var(--border)] rounded-xl p-4 transition-all duration-200"
-                    >
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        {/* Left Info */}
-                        <div className="space-y-1 flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                              Langkah {doc.urutan}
-                            </span>
-                            <span
-                              className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
-                                doc.urgency === "Urgent"
-                                  ? "bg-red-500/10 text-red-400 border-red-500/30"
-                                  : "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                              }`}
-                            >
-                              {doc.urgency || "Normal"}
-                            </span>
-                            <span className="text-xs text-[var(--text-muted)]">
-                              Dokumen ID: #{doc.dokumen_id}
-                            </span>
-                          </div>
-                          <p className="text-sm font-semibold text-[var(--text-primary)] mt-1">
-                            Grup Approver: {doc.approver_group_name}
-                          </p>
-                        </div>
-
-                        {/* Right Actions */}
-                        <div className="flex items-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-[var(--border)]">
-                          <button
-                            onClick={() => setShowRevisionModal(doc.persetujuan_id)}
-                            disabled={actioningId !== null}
-                            className="btn-secondary text-xs py-1.5 px-3"
-                          >
-                            Revisi / Tolak
-                          </button>
-                          <button
-                            onClick={() =>
-                              handleApprovalAction(doc.persetujuan_id, "Disetujui")
-                            }
-                            disabled={actioningId !== null}
-                            className="btn-primary text-xs py-1.5 px-4"
-                          >
-                            Setujui
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <span className="text-slate-500 group-hover:text-rose-400 transition-colors text-xs font-bold">→</span>
             </div>
-          )}
-
-          {showPersonalSummary && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="glass-card p-5">
-                <h2 className="font-semibold mb-3">Kehadiran Saya</h2>
-                <div className="flex items-end gap-3">
-                  <div className="text-3xl font-bold text-green-500">92%</div>
-                  <div className="text-xs text-[var(--text-muted)] mb-1">
-                    Tingkat kehadiran (11/12 rapat)
-                  </div>
-                </div>
-                <Link
-                  href="/dashboard/attendance"
-                  className="text-xs text-[var(--accent)] mt-3 inline-block hover:underline"
-                >
-                  Lihat detail kehadiran →
-                </Link>
+            <div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-extrabold text-white">{stats.meetingCount}</span>
+                <span className="text-xs font-semibold text-slate-400">Upcoming</span>
               </div>
-              <div className="glass-card p-5">
-                <h2 className="font-semibold mb-3">Tugas Aktif</h2>
-                <div className="space-y-2">
-                  {myTasksCount === 0 ? (
-                    <p className="text-xs text-[var(--text-muted)]">
-                      Tidak ada tugas aktif.
-                    </p>
-                  ) : (
-                    <p className="text-sm font-bold text-[var(--accent)]">
-                      {myTasksCount} tugas menunggu diselesaikan!
-                    </p>
-                  )}
-                </div>
-                <Link
-                  href="/dashboard/task"
-                  className="text-xs text-[var(--accent)] mt-3 inline-block hover:underline"
-                >
-                  Kelola tugas →
-                </Link>
-              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Hari ini - Minggu ini</p>
             </div>
-          )}
-        </div>
+          </Link>
 
-        {/* ==========================================
-            3. SIDE WIDGET (KANAN): AGENDA & KAS
-           ========================================== */}
-        <div className="space-y-6">
-          {/* WIDGET: AGENDA */}
-          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-2xl p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
-              <h2 className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2">
-                <span>📅 Agenda</span>
-              </h2>
-              <Link
-                href="/dashboard/schedule"
-                className="text-[11px] font-semibold text-[var(--accent)] hover:underline"
-              >
-                Kalender →
-              </Link>
-            </div>
-
-            <div className="space-y-3">
-              {savedAgendas.length > 0 ? (
-                savedAgendas.slice(0, 3).map((item, idx) => {
-                  const dateParts = item.startDate ? item.startDate.split("-") : [];
-                  const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
-                  const dateLabel = dateParts.length === 3 ? `${parseInt(dateParts[2], 10)} ${months[parseInt(dateParts[1], 10) - 1]}` : item.startDate;
-
-                  return (
-                    <div
-                      key={item.id || idx}
-                      className="p-3.5 rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] transition-all"
-                    >
-                      <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="font-semibold text-blue-400">
-                          {dateLabel ? `${dateLabel} • ` : ""}{item.startTime || "15:00"} WIB
-                        </span>
-                      </div>
-                      <h4 className="text-xs font-bold text-[var(--text-primary)]">
-                        {item.title}
-                      </h4>
-                      <p className="text-[11px] text-[var(--text-muted)] mt-1 flex items-center gap-1">
-                        <svg className="w-3 h-3 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                        </svg>
-                        {item.location || "Ruang OSIS"}
-                      </p>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="text-center py-6 text-xs text-[var(--text-muted)] border border-dashed border-[var(--border)] rounded-xl">
-                  Belum ada agenda terdaftar.
-                </div>
-              )}
-            </div>
-            <Link
-              href="/dashboard/schedule"
-              className="btn-secondary w-full text-xs justify-center block text-center"
-            >
-              Lihat Kalender Lengkap
-            </Link>
-          </div>
-
-          {/* WIDGET: RINGKASAN KAS BULAN INI */}
-          {showFinancialSummary && (
-            <div className="bg-gradient-to-br from-[var(--bg-secondary)] via-[var(--bg-secondary)] to-emerald-950/30 border border-emerald-500/20 rounded-2xl p-6 shadow-xl space-y-4">
-              <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
-                <div>
-                  <h2 className="text-sm font-bold text-[var(--text-primary)]">
-                    📊 Ringkasan Arus Kas
-                  </h2>
-                  <p className="text-[10px] text-[var(--text-muted)]">
-                    Performa Keuangan Bulan Ini
-                  </p>
-                </div>
-              </div>
-
-              {/* Income vs Expense Stat */}
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div className="p-3 bg-[var(--bg-primary)] rounded-xl border border-[var(--border)]">
-                  <span className="text-[10px] font-medium text-[var(--text-muted)] block">
-                    Pemasukan
-                  </span>
-                  <span className="text-sm font-bold text-emerald-400 mt-0.5 block truncate">
-                    ↑ {formatCurrency(monthlyIncome)}
-                  </span>
-                </div>
-                <div className="p-3 bg-[var(--bg-primary)] rounded-xl border border-[var(--border)]">
-                  <span className="text-[10px] font-medium text-[var(--text-muted)] block">
-                    Pengeluaran
-                  </span>
-                  <span className="text-sm font-bold text-rose-400 mt-0.5 block truncate">
-                    ↓ {formatCurrency(monthlyExpense)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Visual Ratio Bar */}
-              <div className="space-y-1.5 pt-2">
-                <div className="flex justify-between text-[11px] font-medium text-[var(--text-muted)]">
-                  <span>Rasio Arus Kas</span>
-                  <span className="text-emerald-400 font-semibold">
-                    {incomeRatio}% Pemasukan
-                  </span>
-                </div>
-                <div className="w-full h-2 rounded-full bg-[var(--border)] overflow-hidden flex">
-                  <div
-                    style={{ width: `${incomeRatio}%` }}
-                    className="bg-emerald-500 h-full rounded-l-full"
-                  ></div>
-                  <div
-                    style={{ width: `${100 - incomeRatio}%` }}
-                    className="bg-rose-500 h-full rounded-r-full"
-                  ></div>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
+      {/* MAIN 2-COLUMN SPLIT GRID */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-2">
+
+        {/* LEFT COLUMN: ANTRIAN PERSETUJUAN DOKUMEN TABLE (8 COLS) */}
+        <div className="lg:col-span-8 space-y-6">
+          <div id="approval-section" className="bg-[#1e293b]/90 border border-slate-700/60 rounded-3xl p-6 shadow-lg space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <span>📥 Antrian Persetujuan Dokumen</span>
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    {pendingList.length} Berkas
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Verifikasi proposal dan berkas laporan yang membutuhkan pengesahan pimpinan.
+                </p>
+              </div>
+            </div>
+
+            {/* TABLE FORMATTED ACCORDING TO MOCKUP */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-700/80 bg-slate-800/60 text-slate-400 font-bold uppercase tracking-wider text-[11px]">
+                    <th className="py-3.5 px-4 rounded-l-xl">Dokumen</th>
+                    <th className="py-3.5 px-4">Divisi</th>
+                    <th className="py-3.5 px-4">Pengaju</th>
+                    <th className="py-3.5 px-4">Status</th>
+                    <th className="py-3.5 px-4 text-right rounded-r-xl">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-slate-500">
+                        Memuat antrian persetujuan...
+                      </td>
+                    </tr>
+                  ) : pendingList.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-10 text-center text-slate-400">
+                        <div className="w-10 h-10 mx-auto rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-2 font-bold border border-emerald-500/20">
+                          ✓
+                        </div>
+                        Tidak ada antrian persetujuan dokumen saat ini.
+                      </td>
+                    </tr>
+                  ) : (
+                    pendingList.map((doc, idx) => (
+                      <tr key={doc.persetujuan_id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="py-3.5 px-4 font-semibold text-slate-200 flex items-center gap-2">
+                          <span>📄</span> Proposal Proker Divisi {idx + 1}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-300 font-medium">
+                          {doc.approver_group_name || `Divisi ${idx + 1}`}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-300 font-medium">
+                          {user?.nama || "Pengurus OSIS"}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            doc.urgency === "Urgent"
+                              ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                              : doc.urgency === "High"
+                              ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                              : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                          }`}>
+                            {doc.urgency || "Active"}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => setShowRevisionModal(doc.persetujuan_id)}
+                              disabled={actioningId !== null}
+                              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] py-1.5 px-3 rounded-lg transition-all cursor-pointer"
+                            >
+                              Revisi
+                            </button>
+                            <button
+                              onClick={() => handleApprovalAction(doc.persetujuan_id, "Disetujui")}
+                              disabled={actioningId !== null}
+                              className="bg-[#2563eb] hover:bg-blue-600 text-white font-semibold text-[11px] py-1.5 px-3.5 rounded-lg shadow-sm transition-all cursor-pointer"
+                            >
+                              Setujui
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: CALENDAR & HARIAN AGENDA (4 COLS) */}
+        <div className="lg:col-span-4 space-y-6">
+          <div className="bg-[#1e293b]/90 border border-slate-700/60 rounded-3xl p-6 shadow-lg space-y-5">
+            
+            {/* Calendar Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-white tracking-wide">
+                  {monthNames[currentMonthIndex].slice(0, 3)} {currentYear}
+                </h3>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handlePrevMonth}
+                    className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold transition-colors cursor-pointer"
+                    aria-label="Bulan Sebelumnya"
+                  >
+                    &lt;
+                  </button>
+                  <button
+                    onClick={handleNextMonth}
+                    className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold transition-colors cursor-pointer"
+                    aria-label="Bulan Berikutnya"
+                  >
+                    &gt;
+                  </button>
+                </div>
+              </div>
+
+              <Link
+                href="/dashboard/schedule"
+                className="bg-[#2563eb] hover:bg-blue-600 text-white font-semibold text-xs py-2 px-3.5 rounded-xl shadow-md shadow-blue-500/20 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>📅</span> Kelola Kalender
+              </Link>
+            </div>
+
+            {/* Days Header */}
+            <div className="grid grid-cols-7 text-center text-[10px] font-semibold uppercase text-slate-400">
+              <span>Mon</span>
+              <span>Tue</span>
+              <span>Wed</span>
+              <span>Thu</span>
+              <span>Fri</span>
+              <span>Sat</span>
+              <span>Sun</span>
+            </div>
+
+            {/* Calendar Days Grid */}
+            <div className="grid grid-cols-7 text-center gap-y-1.5 text-xs font-medium">
+              {Array.from({ length: startDayOffset }).map((_, i) => (
+                <div key={`empty-${i}`} className="py-1 text-transparent" />
+              ))}
+
+              {Array.from({ length: daysInMonth }).map((_, i) => {
+                const dayNum = i + 1;
+                const dayDateStr = getDateStr(currentYear, currentMonthIndex, dayNum);
+                const hasAgenda = agendas.some((a) => a.startDate === dayDateStr);
+                const isSelected = selectedDay === dayNum;
+
+                return (
+                  <button
+                    key={dayNum}
+                    onClick={() => setSelectedDay(dayNum)}
+                    className={`py-1.5 mx-auto w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer text-xs relative ${
+                      isSelected
+                        ? "bg-[#2563eb] text-white font-bold shadow-md shadow-blue-500/40 scale-105"
+                        : hasAgenda
+                        ? "bg-blue-500/20 text-blue-400 font-bold border border-blue-500/30"
+                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                    }`}
+                  >
+                    {dayNum}
+                    {hasAgenda && !isSelected && (
+                      <span className="absolute bottom-1 w-1 h-1 rounded-full bg-blue-400" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Harian Agenda Box */}
+            <div className="pt-4 border-t border-slate-800">
+              <div className="flex items-center justify-between text-xs mb-3">
+                <span className="font-bold text-white">
+                  Harian Agenda
+                </span>
+                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 font-semibold">
+                  {selectedAgendas.length} Acara
+                </span>
+              </div>
+
+              {selectedAgendas.length > 0 ? (
+                <div className="space-y-3">
+                  {selectedAgendas.map((item) => (
+                    <div
+                      key={item.id}
+                      className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700/80 space-y-1 animate-fade-in relative group"
+                    >
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="font-bold text-blue-400">{item.startTime} - {item.endTime} WIB</span>
+                        <button
+                          onClick={() => setAgendaToDelete(item)}
+                          className="text-slate-400 hover:text-rose-400 p-1 rounded hover:bg-rose-500/10 transition-colors cursor-pointer"
+                          title="Hapus Agenda Ini"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                          </svg>
+                        </button>
+                      </div>
+                      <h4 className="text-xs font-bold text-white leading-snug">
+                        {item.title}
+                      </h4>
+                      <p className="text-[11px] text-slate-400 flex items-center gap-1.5 pt-0.5">
+                        <span>📍 {item.location}</span>
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-4 text-center text-xs text-slate-400 bg-slate-800/40 rounded-2xl border border-dashed border-slate-700/80 space-y-2">
+                  <p>Tidak ada agenda khusus pada tanggal {selectedDay} {monthNames[currentMonthIndex]}.</p>
+                  <Link
+                    href="/dashboard/schedule?action=add"
+                    className="text-xs font-semibold text-blue-400 hover:underline inline-block cursor-pointer"
+                  >
+                    + Tambah agenda untuk tanggal ini
+                  </Link>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* PORTAL MODALS: RENDERED AT BODY LEVEL VIA createPortal */}
+      {mounted && agendaToDelete && createPortal(
+        <div className="fixed inset-0 w-screen h-screen z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fade-in">
+          <div className="bg-[#1e293b] rounded-2xl p-6 sm:p-8 shadow-2xl max-w-sm w-full space-y-5 text-slate-100 border border-slate-700 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="text-lg font-extrabold text-white">Hapus Agenda Ini?</h3>
+              <p className="text-xs text-slate-400 font-medium max-w-xs mx-auto">
+                Apakah Anda yakin ingin menghapus agenda &quot;<span className="font-bold text-slate-200">{agendaToDelete.title}</span>&quot;?
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                onClick={() => setAgendaToDelete(null)}
+                className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="px-6 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/20 transition-all cursor-pointer"
+              >
+                Ya, Hapus
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* SWEETALERT TOAST NOTIFICATION */}
+      {mounted && toast && createPortal(
+        <div className="fixed inset-0 w-screen h-screen z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md pointer-events-none animate-fade-in">
+          <div className="bg-[#1e293b] border border-slate-700 rounded-2xl p-6 shadow-2xl flex flex-col items-center text-center max-w-xs w-full space-y-3 pointer-events-auto transform scale-100 transition-all">
+            {toast.type === "success" ? (
+              <div className="w-14 h-14 rounded-full bg-emerald-500/20 border-2 border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-md">
+                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-rose-500/20 border-2 border-rose-500/40 flex items-center justify-center text-rose-400 shadow-md">
+                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+            )}
+            <h3 className="text-base font-extrabold text-white mt-1">{toast.title}</h3>
+            <p className="text-xs text-slate-400 font-medium leading-relaxed">{toast.message}</p>
+          </div>
+        </div>,
+        document.body
+      )}
+
       {/* REVISION / REJECTION MODAL */}
-      {showRevisionModal !== null && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="glass-card p-6 w-full max-w-md space-y-4">
-            <h3 className="text-lg font-semibold flex items-center gap-2">
+      {mounted && showRevisionModal !== null && createPortal(
+        <div className="fixed inset-0 w-screen h-screen z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fade-in">
+          <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md space-y-4 shadow-2xl border border-slate-700 text-slate-100">
+            <h3 className="text-lg font-bold flex items-center gap-2 text-white">
               📝 Berikan Catatan Revisi
             </h3>
             <textarea
               rows={4}
               value={revisionNotes}
               onChange={(e) => setRevisionNotes(e.target.value)}
-              className="input-field text-sm resize-none"
+              className="w-full px-4 py-3 bg-slate-800/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500 focus:bg-slate-800 transition-all font-medium resize-none"
               placeholder="Jelaskan bagian mana yang perlu diperbaiki..."
               required
             ></textarea>
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setShowRevisionModal(null)}
-                className="btn-secondary text-xs"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs py-2 px-4 rounded-xl transition-all cursor-pointer"
               >
                 Batal
               </button>
@@ -678,13 +676,14 @@ export default function DashboardPage() {
                   handleApprovalAction(showRevisionModal, "Ditolak", revisionNotes)
                 }
                 disabled={!revisionNotes.trim() || actioningId !== null}
-                className="btn-primary text-xs"
+                className="bg-[#2563eb] hover:bg-blue-600 text-white font-semibold text-xs py-2 px-4 rounded-xl shadow-md shadow-blue-500/20 transition-all cursor-pointer"
               >
                 Kirim Revisi
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

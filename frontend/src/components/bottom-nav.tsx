@@ -120,14 +120,17 @@ export default function BottomNav() {
   useEffect(() => {
     if (!user) return;
 
+    const defaultTabs: RenderTab[] = [
+      { label: "Home", href: "/dashboard", icon: iconMap["Home"] },
+      { label: "Task", href: "/dashboard/task", icon: iconMap["Task"] },
+      { label: "Proker", href: "/dashboard/proker", icon: iconMap["Program Kerja"] },
+      { label: "Rapat", href: "/dashboard/meetings", icon: iconMap["Rapat"] },
+      { label: "Menu", href: "/dashboard/updates", icon: iconMap["Menu"] },
+    ];
+
     api.getNavModules()
       .then((res) => {
         // Spec 02: Bottom nav 5 slot tetap (Home, Task, Program Kerja, [Slot 4 Dynamic], Menu)
-        // - Slot 1: Home
-        // - Slot 2: Task
-        // - Slot 3: Program Kerja
-        // - Slot 4: Dinamis (diambil dari role_modules[0] jika ada, jika tidak default Rapat)
-        // - Slot 5: Menu (membuka drawer/drawer menu)
         const output: RenderTab[] = [];
 
         // Slot 1: Home
@@ -152,8 +155,9 @@ export default function BottomNav() {
         });
 
         // Slot 4: Dynamic (Swap to first role module if exists, otherwise Rapat)
-        if (res.role_modules.length > 0) {
-          const dynamicMod = res.role_modules[0];
+        const roleMods = res?.role_modules || [];
+        if (roleMods.length > 0) {
+          const dynamicMod = roleMods[0];
           output.push({
             label: dynamicMod.module_name,
             href: hrefMap[dynamicMod.module_name] || "/dashboard",
@@ -167,7 +171,7 @@ export default function BottomNav() {
           });
         }
 
-        // Slot 5: Menu drawer trigger (di web ini dialihkan ke route Updates/Info sebagai representasi drawer sementara)
+        // Slot 5: Menu drawer trigger
         output.push({
           label: "Menu",
           href: "/dashboard/updates",
@@ -177,7 +181,8 @@ export default function BottomNav() {
         setTabs(output);
       })
       .catch((err) => {
-        console.error("Gagal load mobile nav:", err);
+        console.warn("Gagal load mobile nav, menggunakan fallback:", err?.message || err);
+        setTabs(defaultTabs);
       });
   }, [user]);
 
