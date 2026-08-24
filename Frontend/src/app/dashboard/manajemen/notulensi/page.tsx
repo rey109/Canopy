@@ -122,7 +122,7 @@ export default function ManajemenNotulensiPage() {
                     <td className="px-4 py-3 text-[var(--text-muted)] whitespace-nowrap">
                       {new Date(n.tanggal_rapat).toLocaleDateString("id-ID", { dateStyle: "medium" })}
                     </td>
-                    <td className="px-4 py-3 text-[var(--text-muted)]">{getDivisionName(n.division_id)}</td>
+                    <td className="px-4 py-3 text-[var(--text-muted)]">{getDivisionName(n.division_id ?? null)}</td>
                     <td className="px-4 py-3 text-[var(--text-muted)] max-w-[150px] truncate">{getProkerName(n.proker_id)}</td>
                     <td className="px-4 py-3">{n.notulis || "—"}</td>
                     <td className="px-4 py-3">
