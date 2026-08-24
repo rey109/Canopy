@@ -167,6 +167,8 @@ export interface RapatDetail {
   rapat_id: number;
   periode_id: number;
   division_id: number | null;
+  proker_id?: number | null;
+  target_role?: string | null;
   judul: string;
   tanggal: string;
   lokasi: string;
@@ -200,10 +202,37 @@ export interface NotulensiDetail {
   notulensi_id: number;
   rapat_id: number;
   isi: string;
+  tempat?: string;
+  pimpinan_rapat?: string;
+  notulis: string;
+  peserta?: string;
+  agenda_pembahasan?: string;
+  hasil_pembahasan?: string;
+  keputusan_rapat?: string;
+  tindak_lanjut?: string;
+  pic?: string;
+  deadline_tl?: string | null;
+  catatan_tambahan?: string;
   attachments: NotulensiAttachment[];
   difinalisasi_oleh: string | null;
   status: string; // 'Draft', 'Final'
   updated_at: string;
+}
+
+export interface NotulensiListItem extends NotulensiDetail {
+  judul_rapat: string;
+  tanggal_rapat: string;
+  division_id: number | null;
+  proker_id: number | null;
+}
+
+export interface DokumentasiDetail {
+  dok_id: number;
+  rapat_id: number;
+  file_url: string;
+  diunggah_oleh: string;
+  keterangan: string;
+  created_at: string;
 }
 
 export interface PengumumanDetail {
@@ -795,11 +824,32 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 
-  upsertNotulensi: (id: number, isi: string, attachments: NotulensiAttachment[] = []) =>
-    request<NotulensiDetail>(`/rapat/${id}/notulensi`, {
+  upsertNotulensi: (
+    id: number,
+    data: string | (Partial<NotulensiDetail> & { attachments?: NotulensiAttachment[] }),
+    attachments: NotulensiAttachment[] = []
+  ) => {
+    const body = typeof data === "string" ? { isi: data, attachments } : data;
+    return request<NotulensiDetail>(`/rapat/${id}/notulensi`, {
       method: "PUT",
-      body: JSON.stringify({ isi, attachments }),
+      body: JSON.stringify(body),
+    });
+  },
+
+  listAllNotulensi: () =>
+    request<{ notulensi: NotulensiListItem[] }>("/notulensi"),
+
+  listDokumentasi: (rapatId: number) =>
+    request<{ dokumentasi: DokumentasiDetail[] }>(`/rapat/${rapatId}/dokumentasi`),
+
+  addDokumentasi: (rapatId: number, data: { file_url: string; keterangan?: string }) =>
+    request<DokumentasiDetail>(`/rapat/${rapatId}/dokumentasi`, {
+      method: "POST",
+      body: JSON.stringify(data),
     }),
+
+  deleteDokumentasi: (dokId: number) =>
+    request<{ message: string }>(`/dokumentasi/${dokId}`, { method: "DELETE" }),
 
   uploadNotulensiFile: async (
     rapatId: number,
