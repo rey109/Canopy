@@ -28,7 +28,6 @@ type RapatDetail struct {
 	RapatID    int        `json:"rapat_id"`
 	PeriodeID  int        `json:"periode_id"`
 	DivisionID *int       `json:"division_id"`
-	ProkerID   *int       `json:"proker_id"`
 	Judul      string     `json:"judul"`
 	Tanggal    time.Time  `json:"tanggal"`
 	Lokasi     string     `json:"lokasi"`
@@ -41,7 +40,6 @@ type RapatDetail struct {
 
 type CreateRapatParams struct {
 	DivisionID *int      `json:"division_id"`
-	ProkerID   *int      `json:"proker_id"`
 	Judul      string    `json:"judul"`
 	Tanggal    time.Time `json:"tanggal"`
 	Lokasi     string    `json:"lokasi"`
@@ -88,27 +86,22 @@ func BuatRapat(ctx context.Context, params *CreateRapatParams) (*RapatDetail, er
 		divID.Valid = true
 		divID.Int32 = int32(*params.DivisionID)
 	}
-	var prokerID sql.NullInt32
-	if params.ProkerID != nil {
-		prokerID.Valid = true
-		prokerID.Int32 = int32(*params.ProkerID)
-	}
 
 	var r RapatDetail
-	var retDivID, retProkerID sql.NullInt32
+	var retDivID sql.NullInt32
 	var retQR sql.NullString
 	err := db.QueryRow(ctx, `
 		INSERT INTO rapat
-			(periode_id, division_id, proker_id, judul, tanggal, lokasi, agenda, dibuat_oleh, status, qr_code)
+			(periode_id, division_id, judul, tanggal, lokasi, agenda, dibuat_oleh, status, qr_code)
 		VALUES (
 			(SELECT periode_id FROM periode WHERE is_aktif = TRUE LIMIT 1),
-			$1, $2, $3, $4, $5, $6, $7, 'Terjadwal', $8
+			$1, $2, $3, $4, $5, $6, 'Terjadwal', $7
 		)
-		RETURNING rapat_id, periode_id, division_id, proker_id, judul, tanggal, lokasi, agenda,
+		RETURNING rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
 		          dibuat_oleh, status, qr_code, created_at
-	`, divID, prokerID, params.Judul, params.Tanggal, params.Lokasi, params.Agenda, string(nis), qrToken).
+	`, divID, params.Judul, params.Tanggal, params.Lokasi, params.Agenda, string(nis), qrToken).
 		Scan(
-			&r.RapatID, &r.PeriodeID, &retDivID, &retProkerID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
+			&r.RapatID, &r.PeriodeID, &retDivID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
 			&r.DibuatOleh, &r.Status, &retQR, &r.CreatedAt,
 		)
 	if err != nil {
@@ -117,10 +110,6 @@ func BuatRapat(ctx context.Context, params *CreateRapatParams) (*RapatDetail, er
 	if retDivID.Valid {
 		v := int(retDivID.Int32)
 		r.DivisionID = &v
-	}
-	if retProkerID.Valid {
-		v := int(retProkerID.Int32)
-		r.ProkerID = &v
 	}
 	if retQR.Valid {
 		r.QRCode = &retQR.String
@@ -139,13 +128,13 @@ func ListRapat(ctx context.Context) (*ListRapatResponse, error) {
 	// Trimitra/Sekretaris Umum lihat semua; lainnya hanya rapat divisinya + rapat org
 	if ud.HasScopeAll() {
 		rows, err = db.Query(ctx, `
-			SELECT rapat_id, periode_id, division_id, proker_id, judul, tanggal, lokasi, agenda,
+			SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
 			       dibuat_oleh, status, NULL AS qr_code, created_at
 			FROM rapat ORDER BY tanggal DESC
 		`)
 	} else {
 		rows, err = db.Query(ctx, `
-			SELECT rapat_id, periode_id, division_id, proker_id, judul, tanggal, lokasi, agenda,
+			SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
 			       dibuat_oleh, status,
 			       CASE WHEN dibuat_oleh = $1 THEN qr_code ELSE NULL END AS qr_code,
 			       created_at
@@ -175,7 +164,7 @@ func GetRapat(ctx context.Context, id int) (*RapatDetail, error) {
 	nisStr, _ := auth.UserID()
 
 	row := db.QueryRow(ctx, `
-		SELECT rapat_id, periode_id, division_id, proker_id, judul, tanggal, lokasi, agenda,
+		SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
 		       dibuat_oleh, status,
 		       CASE WHEN dibuat_oleh = $1 THEN qr_code ELSE NULL END AS qr_code,
 		       created_at
@@ -198,7 +187,7 @@ type UpdateStatusRapatParams struct {
 //encore:api auth path=/rapat/:id/status method=PUT
 func UpdateStatusRapat(ctx context.Context, id int, params *UpdateStatusRapatParams) (*MessageResponse, error) {
 	nisStr, _ := auth.UserID()
-	valid := map[string]bool{"Terjadwal": true, "Berlangsung": true, "Selesai": true, "Dibatalkan": true}
+	valid := map[string]bool{"Terjadwal": true, "Berlangsung": true, "Selesai": true}
 	if !valid[params.Status] {
 		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "status tidak valid"}
 	}
@@ -213,125 +202,6 @@ func UpdateStatusRapat(ctx context.Context, id int, params *UpdateStatusRapatPar
 		return nil, &errs.Error{Code: errs.NotFound, Message: "rapat tidak ditemukan atau bukan milikmu"}
 	}
 	return &MessageResponse{Message: "Status rapat diperbarui"}, nil
-}
-
-type UpdateRapatParams struct {
-	Judul      string `json:"judul"`
-	Tanggal    string `json:"tanggal"`
-	Lokasi     string `json:"lokasi"`
-	Agenda     string `json:"agenda"`
-	DivisionID *int   `json:"division_id"`
-	ProkerID   *int   `json:"proker_id"`
-	Status     string `json:"status"`
-}
-
-func canManageRapat(ud *user.UserData, dibuatOleh string) bool {
-	if ud.GroupName == "Trimitra" || ud.GroupName == "Pembina" || ud.GroupName == "Sekretaris" {
-		return true
-	}
-	return string(ud.NIS) == dibuatOleh
-}
-
-//encore:api auth path=/rapat/:id method=PUT
-func UpdateRapat(ctx context.Context, id int, params *UpdateRapatParams) (*RapatDetail, error) {
-	nisStr, _ := auth.UserID()
-	ud := auth.Data().(*user.UserData)
-
-	var existingDibuatOleh string
-	err := db.QueryRow(ctx, `SELECT dibuat_oleh FROM rapat WHERE rapat_id = $1`, id).Scan(&existingDibuatOleh)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, &errs.Error{Code: errs.NotFound, Message: "rapat tidak ditemukan"}
-		}
-		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-	}
-	if !canManageRapat(ud, existingDibuatOleh) && existingDibuatOleh != string(nisStr) {
-		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "kamu tidak berhak mengubah rapat ini"}
-	}
-
-	var divID, prokerID sql.NullInt32
-	if params.DivisionID != nil {
-		divID.Valid = true
-		divID.Int32 = int32(*params.DivisionID)
-	}
-	if params.ProkerID != nil {
-		prokerID.Valid = true
-		prokerID.Int32 = int32(*params.ProkerID)
-	}
-
-	tanggal, err := time.Parse(time.RFC3339, params.Tanggal)
-	if err != nil {
-		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "format tanggal tidak valid"}
-	}
-
-	status := params.Status
-	if status == "" {
-		status = "Terjadwal"
-	}
-	valid := map[string]bool{"Terjadwal": true, "Berlangsung": true, "Selesai": true, "Dibatalkan": true}
-	if !valid[status] {
-		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "status tidak valid"}
-	}
-
-	var r RapatDetail
-	var retDivID, retProkerID sql.NullInt32
-	var retQR sql.NullString
-	err = db.QueryRow(ctx, `
-		UPDATE rapat SET judul = $1, tanggal = $2, lokasi = $3, agenda = $4,
-		    division_id = $5, proker_id = $6, status = $7
-		WHERE rapat_id = $8
-		RETURNING rapat_id, periode_id, division_id, proker_id, judul, tanggal, lokasi, agenda,
-		          dibuat_oleh, status, qr_code, created_at
-	`, params.Judul, tanggal, params.Lokasi, params.Agenda, divID, prokerID, status, id).
-		Scan(&r.RapatID, &r.PeriodeID, &retDivID, &retProkerID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
-			&r.DibuatOleh, &r.Status, &retQR, &r.CreatedAt)
-	if err != nil {
-		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-	}
-	if retDivID.Valid {
-		v := int(retDivID.Int32)
-		r.DivisionID = &v
-	}
-	if retProkerID.Valid {
-		v := int(retProkerID.Int32)
-		r.ProkerID = &v
-	}
-	if retQR.Valid {
-		r.QRCode = &retQR.String
-	}
-	return &r, nil
-}
-
-//encore:api auth path=/rapat/:id method=DELETE
-func DeleteRapat(ctx context.Context, id int) (*MessageResponse, error) {
-	nisStr, _ := auth.UserID()
-	ud := auth.Data().(*user.UserData)
-
-	var dibuatOleh string
-	err := db.QueryRow(ctx, `SELECT dibuat_oleh FROM rapat WHERE rapat_id = $1`, id).Scan(&dibuatOleh)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, &errs.Error{Code: errs.NotFound, Message: "rapat tidak ditemukan"}
-		}
-		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-	}
-	if !canManageRapat(ud, dibuatOleh) && dibuatOleh != string(nisStr) {
-		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "kamu tidak berhak menghapus rapat ini"}
-	}
-
-	// notulensi & dokumentasi terhapus otomatis via ON DELETE CASCADE
-	_, err = db.Exec(ctx, `DELETE FROM presensi WHERE acara_type = 'Rapat' AND acara_id = $1`, id)
-	if err != nil {
-		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-	}
-	res, err := db.Exec(ctx, `DELETE FROM rapat WHERE rapat_id = $1`, id)
-	if err != nil {
-		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-	}
-	if res.RowsAffected() == 0 {
-		return nil, &errs.Error{Code: errs.NotFound, Message: "rapat tidak ditemukan"}
-	}
-	return &MessageResponse{Message: "Rapat berhasil dihapus"}, nil
 }
 
 // ============================================================
@@ -514,247 +384,6 @@ func GetNotulensi(ctx context.Context, id int) (*NotulensiDetail, error) {
 		n.Attachments = []NotulensiAttachment{}
 	}
 	return &n, nil
-}
-
-// LookupRapatByQR — cari rapat berdasarkan QR token (dipanggil setelah kamera scan)
-type LookupQRParams struct {
-	QRToken string `query:"qr_token"`
-}
-
-//encore:api auth path=/lookup-qr method=GET
-func LookupRapatByQR(ctx context.Context, params *LookupQRParams) (*RapatDetail, error) {
-	var r RapatDetail
-	var retDivID, retProkerID sql.NullInt32
-	var retQR sql.NullString
-	err := db.QueryRow(ctx, `
-		SELECT rapat_id, periode_id, division_id, proker_id, judul, tanggal, lokasi, agenda,
-		       dibuat_oleh, status, qr_code, created_at
-		FROM rapat WHERE qr_code = $1
-	`, params.QRToken).Scan(
-		&r.RapatID, &r.PeriodeID, &retDivID, &retProkerID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
-		&r.DibuatOleh, &r.Status, &retQR, &r.CreatedAt,
-	)
-	if err != nil {
-		return nil, &errs.Error{Code: errs.NotFound, Message: "QR token tidak cocok dengan rapat manapun"}
-	}
-	if retDivID.Valid {
-		v := int(retDivID.Int32)
-		r.DivisionID = &v
-	}
-	if retProkerID.Valid {
-		v := int(retProkerID.Int32)
-		r.ProkerID = &v
-	}
-	if retQR.Valid {
-		r.QRCode = &retQR.String
-	}
-	return &r, nil
-}
-
-// ============================================================
-// DOKUMENTASI RAPAT
-// File disimpan persistent di database, terhubung via rapat_id.
-// file_url dapat berupa URL eksternal ATAU data-URL base64.
-// ============================================================
-
-type DokumentasiDetail struct {
-	DokID        int       `json:"dok_id"`
-	RapatID      int       `json:"rapat_id"`
-	FileURL      string    `json:"file_url"`
-	NamaFile     string    `json:"nama_file"`
-	TipeFile     string    `json:"tipe_file"`
-	Ukuran       int64     `json:"ukuran"`
-	DiunggahOleh string    `json:"diunggah_oleh"`
-	Keterangan   string    `json:"keterangan"`
-	CreatedAt    time.Time `json:"created_at"`
-}
-
-type AddDokumentasiParams struct {
-	FileURL    string `json:"file_url"`
-	NamaFile   string `json:"nama_file"`
-	TipeFile   string `json:"tipe_file"`
-	Ukuran     int64  `json:"ukuran"`
-	Keterangan string `json:"keterangan"`
-}
-
-type BatchDokumentasiParams struct {
-	Files []AddDokumentasiParams `json:"files"`
-}
-
-type ListDokumentasiResponse struct {
-	Dokumentasi []DokumentasiDetail `json:"dokumentasi"`
-}
-
-const maxDokumentasiChars = 12 * 1024 * 1024 // ±8MB binary saat di-encode base64
-
-func validateDokumentasi(p AddDokumentasiParams) error {
-	if p.FileURL == "" && p.NamaFile == "" {
-		return &errs.Error{Code: errs.InvalidArgument, Message: "file kosong"}
-	}
-	if len(p.FileURL) > maxDokumentasiChars {
-		return &errs.Error{Code: errs.InvalidArgument, Message: "ukuran file melebihi batas 8MB"}
-	}
-	return nil
-}
-
-//encore:api auth path=/rapat/:id/dokumentasi method=POST
-func AddDokumentasi(ctx context.Context, id int, params *AddDokumentasiParams) (*DokumentasiDetail, error) {
-	nis, _ := auth.UserID()
-	if err := validateDokumentasi(*params); err != nil {
-		return nil, err
-	}
-
-	var d DokumentasiDetail
-	err := db.QueryRow(ctx, `
-		INSERT INTO rapat_dokumentasi (rapat_id, file_url, nama_file, tipe_file, ukuran, diunggah_oleh, keterangan)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING dok_id, rapat_id, file_url, nama_file, tipe_file, ukuran, diunggah_oleh, keterangan, created_at
-	`, id, params.FileURL, params.NamaFile, params.TipeFile, params.Ukuran, string(nis), params.Keterangan).
-		Scan(&d.DokID, &d.RapatID, &d.FileURL, &d.NamaFile, &d.TipeFile, &d.Ukuran, &d.DiunggahOleh, &d.Keterangan, &d.CreatedAt)
-	if err != nil {
-		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-	}
-	return &d, nil
-}
-
-// BatchAddDokumentasi — simpan banyak file dokumentasi sekaligus secara ATOMIK
-// (satu gagal = seluruh batch dibatalkan, tidak ada setengah tersimpan).
-//encore:api auth path=/rapat/:id/dokumentasi/batch method=POST
-func BatchAddDokumentasi(ctx context.Context, id int, params *BatchDokumentasiParams) (*ListDokumentasiResponse, error) {
-	nis, _ := auth.UserID()
-	if len(params.Files) == 0 {
-		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "tidak ada file yang dikirim"}
-	}
-	for _, f := range params.Files {
-		if err := validateDokumentasi(f); err != nil {
-			return nil, err
-		}
-	}
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-	}
-	defer tx.Rollback()
-
-	list := make([]DokumentasiDetail, 0, len(params.Files))
-	for _, f := range params.Files {
-		var d DokumentasiDetail
-		err := tx.QueryRow(ctx, `
-			INSERT INTO rapat_dokumentasi (rapat_id, file_url, nama_file, tipe_file, ukuran, diunggah_oleh, keterangan)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-			RETURNING dok_id, rapat_id, file_url, nama_file, tipe_file, ukuran, diunggah_oleh, keterangan, created_at
-		`, id, f.FileURL, f.NamaFile, f.TipeFile, f.Ukuran, string(nis), f.Keterangan).
-			Scan(&d.DokID, &d.RapatID, &d.FileURL, &d.NamaFile, &d.TipeFile, &d.Ukuran, &d.DiunggahOleh, &d.Keterangan, &d.CreatedAt)
-		if err != nil {
-			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-		}
-		list = append(list, d)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-	}
-	return &ListDokumentasiResponse{Dokumentasi: list}, nil
-}
-
-//encore:api auth path=/rapat/:id/dokumentasi method=GET
-func ListDokumentasi(ctx context.Context, id int) (*ListDokumentasiResponse, error) {
-	rows, err := db.Query(ctx, `
-		SELECT dok_id, rapat_id, file_url, nama_file, tipe_file, ukuran, diunggah_oleh, keterangan, created_at
-		FROM rapat_dokumentasi WHERE rapat_id = $1
-		ORDER BY created_at ASC
-	`, id)
-	if err != nil {
-		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-	}
-	defer rows.Close()
-
-	list := []DokumentasiDetail{}
-	for rows.Next() {
-		var d DokumentasiDetail
-		if err := rows.Scan(&d.DokID, &d.RapatID, &d.FileURL, &d.NamaFile, &d.TipeFile, &d.Ukuran, &d.DiunggahOleh, &d.Keterangan, &d.CreatedAt); err != nil {
-			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-		}
-		list = append(list, d)
-	}
-	return &ListDokumentasiResponse{Dokumentasi: list}, nil
-}
-
-//encore:api auth path=/rapat/dokumentasi/:dokId method=DELETE
-func DeleteDokumentasi(ctx context.Context, dokId int) (*MessageResponse, error) {
-	nisStr, _ := auth.UserID()
-	ud := auth.Data().(*user.UserData)
-
-	var res sqldb.Result
-	var err error
-	if ud.HasScopeAll() || ud.GroupName == "Sekretaris" {
-		res, err = db.Exec(ctx, `DELETE FROM rapat_dokumentasi WHERE dok_id = $1`, dokId)
-	} else {
-		res, err = db.Exec(ctx, `DELETE FROM rapat_dokumentasi WHERE dok_id = $1 AND diunggah_oleh = $2`, dokId, string(nisStr))
-	}
-	if err != nil {
-		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-	}
-	if res.RowsAffected() == 0 {
-		return nil, &errs.Error{Code: errs.NotFound, Message: "dokumentasi tidak ditemukan atau bukan milikmu"}
-	}
-	return &MessageResponse{Message: "Dokumentasi berhasil dihapus"}, nil
-}
-
-// ============================================================
-// LIST NOTULENSI SEMUA — untuk Modul Manajemen
-// ============================================================
-
-type NotulensiListItem struct {
-	NotulensiID  int       `json:"notulensi_id"`
-	RapatID      int       `json:"rapat_id"`
-	JudulRapat   string    `json:"judul_rapat"`
-	TanggalRapat time.Time `json:"tanggal_rapat"`
-	DivisionID   *int      `json:"division_id"`
-	ProkerID     *int      `json:"proker_id"`
-	Notulis      string    `json:"notulis"`
-	Status       string    `json:"status"`
-	UpdatedAt    time.Time `json:"updated_at"`
-}
-
-type ListAllNotulensiResponse struct {
-	Notulensi []NotulensiListItem `json:"notulensi"`
-}
-
-//encore:api auth path=/notulensi method=GET
-func ListAllNotulensi(ctx context.Context) (*ListAllNotulensiResponse, error) {
-	rows, err := db.Query(ctx, `
-		SELECT n.notulensi_id, n.rapat_id, r.judul, r.tanggal, r.division_id, r.proker_id,
-		       n.notulis, n.status, n.updated_at
-		FROM notulensi n
-		JOIN rapat r ON r.rapat_id = n.rapat_id
-		ORDER BY r.tanggal DESC
-	`)
-	if err != nil {
-		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-	}
-	defer rows.Close()
-
-	list := []NotulensiListItem{}
-	for rows.Next() {
-		var item NotulensiListItem
-		var divID, prokerID sql.NullInt32
-		if err := rows.Scan(&item.NotulensiID, &item.RapatID, &item.JudulRapat, &item.TanggalRapat,
-			&divID, &prokerID, &item.Notulis, &item.Status, &item.UpdatedAt); err != nil {
-			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
-		}
-		if divID.Valid {
-			v := int(divID.Int32)
-			item.DivisionID = &v
-		}
-		if prokerID.Valid {
-			v := int(prokerID.Int32)
-			item.ProkerID = &v
-		}
-		list = append(list, item)
-	}
-	return &ListAllNotulensiResponse{Notulensi: list}, nil
 }
 
 // ============================================================
@@ -1140,10 +769,10 @@ func BuatPengumuman(ctx context.Context, params *CreatePengumumanParams) (*Pengu
 
 func scanRapat(row interface{ Scan(...interface{}) error }) (*RapatDetail, error) {
 	var r RapatDetail
-	var divID, prokerID sql.NullInt32
+	var divID sql.NullInt32
 	var qr sql.NullString
 	if err := row.Scan(
-		&r.RapatID, &r.PeriodeID, &divID, &prokerID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
+		&r.RapatID, &r.PeriodeID, &divID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
 		&r.DibuatOleh, &r.Status, &qr, &r.CreatedAt,
 	); err != nil {
 		return nil, err
@@ -1151,10 +780,6 @@ func scanRapat(row interface{ Scan(...interface{}) error }) (*RapatDetail, error
 	if divID.Valid {
 		v := int(divID.Int32)
 		r.DivisionID = &v
-	}
-	if prokerID.Valid {
-		v := int(prokerID.Int32)
-		r.ProkerID = &v
 	}
 	if qr.Valid {
 		r.QRCode = &qr.String

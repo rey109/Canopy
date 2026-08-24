@@ -358,10 +358,8 @@ export default function MeetingsPage() {
     if (!notulensiMeeting) return;
     setSavingNotulensi(true);
     try {
-      // Flush autosave yang mungkin masih pending — simpan final termasuk semua lampiran
       await api.upsertNotulensi(notulensiMeeting.rapat_id, notulensiIsi, notulensiAttachments);
-      setAutoSaveStatus("saved");
-      alert("✓ Notulensi dan lampiran berhasil disimpan.");
+      alert("Notulensi berhasil disimpan sebagai Draft!");
       setNotulensiMeeting(null);
     } catch (err: any) {
       alert("Gagal menyimpan notulensi: " + err.message);
@@ -704,7 +702,7 @@ export default function MeetingsPage() {
                     Detail Lengkap
                   </Link>
                   <button onClick={handleSaveNotulensi} disabled={savingNotulensi} className="btn-secondary text-xs">
-                    {savingNotulensi ? "Menyimpan..." : "💾 Simpan Notulensi & Lampiran"}
+                    Simpan Draft
                   </button>
                   {user?.group_name === "Sekretaris" && user?.level === 1 && (
                     <button onClick={handleFinalisasiNotulensi} disabled={savingNotulensi} className="btn-primary text-xs">
