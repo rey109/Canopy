@@ -820,11 +820,41 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 
-  upsertNotulensi: (id: number, isi: string, attachments: NotulensiAttachment[] = []) =>
-    request<NotulensiDetail>(`/rapat/${id}/notulensi`, {
-      method: "PUT",
-      body: JSON.stringify({ isi, attachments }),
-    }),
+  upsertNotulensi: async (id: number, isi: string, attachments: NotulensiAttachment[] = []): Promise<NotulensiDetail> => {
+    let result: NotulensiDetail | null = null;
+    try {
+      result = await request<NotulensiDetail>(`/rapat/${id}/notulensi`, {
+        method: "PUT",
+        body: JSON.stringify({ isi, attachments }),
+      });
+    } catch (e) {
+      console.warn("Backend unavailable, saving notulensi locally:", e);
+    }
+
+    if (!result || !result.notulensi_id) {
+      result = {
+        notulensi_id: Date.now(),
+        rapat_id: id,
+        isi,
+        attachments,
+        status: "Draft",
+        difinalisasi_oleh: null,
+        updated_at: new Date().toISOString(),
+      };
+    }
+
+    if (typeof window !== "undefined") {
+      const local = localStorage.getItem("canopy_local_notulensi");
+      let map: Record<number, NotulensiDetail> = {};
+      if (local) {
+        try { map = JSON.parse(local); } catch {}
+      }
+      map[id] = { ...map[id], ...result, isi, attachments };
+      localStorage.setItem("canopy_local_notulensi", JSON.stringify(map));
+    }
+
+    return result;
+  },
 
   uploadNotulensiFile: async (
     rapatId: number,
@@ -839,30 +869,113 @@ export const api = {
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
-    const res = await request<{ url: string; name: string; file_type: string }>(
-      `/rapat/${rapatId}/notulensi/upload`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          file_name: file.name,
-          file_type: file.type || "application/octet-stream",
-          file_data_b64: base64,
-        }),
-      }
-    );
-    return { url: res.url, name: res.name, type: res.file_type };
+    try {
+      const res = await request<{ url: string; name: string; file_type: string }>(
+        `/rapat/${rapatId}/notulensi/upload`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            file_name: file.name,
+            file_type: file.type || "application/octet-stream",
+            file_data_b64: base64,
+          }),
+        }
+      );
+      return { url: res.url, name: res.name, type: res.file_type };
+    } catch (e) {
+      console.warn("Backend unavailable, creating local data URL:", e);
+      const dataURL = `data:${file.type || "application/octet-stream"};base64,${base64}`;
+      return { url: dataURL, name: file.name, type: file.type || "application/octet-stream" };
+    }
   },
 
-  finalisasiNotulensi: (id: number) =>
-    request<NotulensiDetail>(`/rapat/${id}/notulensi/finalisasi`, {
-      method: "POST",
-    }),
+  finalisasiNotulensi: async (id: number): Promise<NotulensiDetail> => {
+    let result: NotulensiDetail | null = null;
+    try {
+      result = await request<NotulensiDetail>(`/rapat/${id}/notulensi/finalisasi`, {
+        method: "POST",
+      });
+    } catch (e) {
+      console.warn("Backend unavailable, finalizing notulensi locally:", e);
+    }
 
-  getNotulensi: (id: number) =>
-    request<NotulensiDetail>(`/rapat/${id}/notulensi`),
+    if (typeof window !== "undefined") {
+      const local = localStorage.getItem("canopy_local_notulensi");
+      let map: Record<number, NotulensiDetail> = {};
+      if (local) {
+        try { map = JSON.parse(local); } catch {}
+      }
+      if (map[id]) {
+        map[id] = { ...map[id], status: "Final", updated_at: new Date().toISOString() };
+        if (result) {
+          map[id] = { ...map[id], ...result };
+        }
+        localStorage.setItem("canopy_local_notulensi", JSON.stringify(map));
+        return map[id];
+      }
+    }
 
-  listNotulensi: () =>
-    request<{ notulensi: NotulensiListItem[] }>("/notulensi"),
+    if (result) return result;
+    throw new Error("Notulensi tidak ditemukan");
+  },
+
+  getNotulensi: async (id: number): Promise<NotulensiDetail> => {
+    try {
+      return await request<NotulensiDetail>(`/rapat/${id}/notulensi`);
+    } catch (e) {
+      console.warn("Backend unavailable, loading notulensi locally:", e);
+    }
+    if (typeof window !== "undefined") {
+      const local = localStorage.getItem("canopy_local_notulensi");
+      if (local) {
+        try {
+          const map: Record<number, NotulensiDetail> = JSON.parse(local);
+          if (map[id]) return map[id];
+        } catch {}
+      }
+    }
+    throw new Error("Notulensi belum ada");
+  },
+
+  listNotulensi: async (): Promise<{ notulensi: NotulensiListItem[] }> => {
+    try {
+      const res = await request<{ notulensi: NotulensiListItem[] }>("/notulensi");
+      if (res && Array.isArray(res.notulensi)) {
+        return res;
+      }
+    } catch (e) {
+      console.warn("Backend unavailable, loading local notulensi list:", e);
+    }
+    if (typeof window !== "undefined") {
+      const local = localStorage.getItem("canopy_local_notulensi");
+      if (local) {
+        try {
+          const map: Record<number, NotulensiDetail> = JSON.parse(local);
+          const meetings = JSON.parse(localStorage.getItem("canopy_local_meetings") || "[]") as RapatDetail[];
+          const items: NotulensiListItem[] = Object.values(map).map((n) => {
+            const rapat = meetings.find((m) => m.rapat_id === n.rapat_id);
+            return {
+              notulensi_id: n.notulensi_id,
+              rapat_id: n.rapat_id,
+              judul_rapat: rapat?.judul || `Rapat #${n.rapat_id}`,
+              tanggal_rapat: rapat?.tanggal || n.updated_at,
+              lokasi_rapat: rapat?.lokasi || "",
+              status_rapat: rapat?.status || "Terjadwal",
+              division_id: rapat?.division_id || null,
+              dibuat_oleh: rapat?.dibuat_oleh || "",
+              isi: n.isi,
+              attachments: n.attachments || [],
+              status: n.status,
+              difinalisasi_oleh: n.difinalisasi_oleh || null,
+              updated_at: n.updated_at,
+            };
+          });
+          return { notulensi: items };
+        } catch {}
+      }
+    }
+    return { notulensi: [] };
+  },
 
   scanPresensi: (data: {
     qr_token: string;
