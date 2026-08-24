@@ -269,11 +269,7 @@ export default function DashboardPage() {
             <div>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-extrabold text-white">{stats.prokerCount}</span>
-                <span className="text-xs font-semibold text-slate-400">Active</span>
               </div>
-              <p className="text-[11px] text-slate-400 mt-1">
-                {stats.prokerCount > 0 ? `${stats.prokerCount} Program Kerja Tersimpan` : "Belum Ada Program Kerja"}
-              </p>
             </div>
           </Link>
 
@@ -299,9 +295,7 @@ export default function DashboardPage() {
             <div>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-extrabold text-white">{pendingList.length}</span>
-                <span className="text-xs font-semibold text-rose-400">Urgent</span>
               </div>
-              <p className="text-[11px] text-slate-400 mt-1">Proposals &amp; Letters</p>
             </div>
           </button>
 
@@ -325,7 +319,6 @@ export default function DashboardPage() {
               <div className="flex items-baseline gap-2">
                 <span className="text-xl font-extrabold text-white">{formatCurrency(0)}</span>
               </div>
-              <p className="text-[11px] text-slate-400 mt-1">Belum Ada Kas Masuk</p>
             </div>
           </Link>
 
@@ -348,9 +341,7 @@ export default function DashboardPage() {
             <div>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-extrabold text-white">{stats.meetingCount}</span>
-                <span className="text-xs font-semibold text-slate-400">Upcoming</span>
               </div>
-              <p className="text-[11px] text-slate-400 mt-1">Hari ini - Minggu ini</p>
             </div>
           </Link>
 
