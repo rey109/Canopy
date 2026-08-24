@@ -283,6 +283,17 @@ export default function MeetingsPage() {
     return false;
   };
 
+  const canGenerateQR = user?.group_name === "Sekretaris" || user?.group_name === "Trimitra";
+
+  const handleGenerateQR = async (m: RapatDetail) => {
+    try {
+      const updated = await api.generateMeetingQR(m.rapat_id);
+      setMeetings((current) => current.map((item) => item.rapat_id === m.rapat_id ? updated : item));
+    } catch (err: any) {
+      alert("Gagal membuat QR presensi: " + err.message);
+    }
+  };
+
   const handleOpenAttendance = async (m: RapatDetail) => {
     setSelectedMeeting(m);
     setAttendanceList([]);
@@ -557,14 +568,20 @@ export default function MeetingsPage() {
                     </p>
                   </div>
 
-                  {/* QR Code Banner jika tersedia */}
-                  {m.qr_code && (
-                    <div className="p-3 bg-[var(--bg-primary)] rounded-xl border border-[var(--border)] mb-4 flex items-center justify-between">
+                   {/* QR Code Banner jika tersedia */}
+                   {(m.qr_code || canGenerateQR) && (
+                     <div className="p-3 bg-[var(--bg-primary)] rounded-xl border border-[var(--border)] mb-4 flex items-center justify-between">
+
                       <div>
                         <p className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">Token QR Presensi</p>
-                        <p className="text-xs font-mono font-bold text-[var(--accent)] select-all mt-0.5">{m.qr_code}</p>
-                      </div>
-                      <span className="text-xs px-2 py-1 rounded bg-[var(--accent)]/10 text-[var(--accent)] font-semibold">Aktif</span>
+                        {m.qr_code ? (
+                          <p className="text-xs font-mono font-bold text-[var(--accent)] select-all mt-0.5">{m.qr_code}</p>
+                        ) : (
+                          <button onClick={() => handleGenerateQR(m)} className="btn-primary text-xs py-1 px-2">Buat QR</button>
+                        )}
+                       </div>
+                       {m.qr_code && <span className="text-xs px-2 py-1 rounded bg-[var(--accent)]/10 text-[var(--accent)] font-semibold">Aktif</span>}
+
                     </div>
                   )}
                 </div>

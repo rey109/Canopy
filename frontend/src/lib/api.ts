@@ -824,6 +824,9 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 
+  generateMeetingQR: (id: number) =>
+    request<RapatDetail>(`/rapat/${id}/qr`, { method: "POST" }),
+
   upsertNotulensi: (
     id: number,
     data: string | (Partial<NotulensiDetail> & { attachments?: NotulensiAttachment[] }),
