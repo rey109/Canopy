@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"encore.dev/beta/auth"
@@ -113,6 +115,24 @@ func BuatRapat(ctx context.Context, params *CreateRapatParams) (*RapatDetail, er
 	if retQR.Valid {
 		r.QRCode = &retQR.String
 	}
+
+	// Broadcast pengumuman / notifikasi otomatis
+	target := "Organisasi"
+	if divID.Valid {
+		target = "Divisi"
+	}
+	notifJudul := fmt.Sprintf("📅 Jadwal Rapat Baru: %s", params.Judul)
+	notifIsi := fmt.Sprintf("Rapat '%s' telah dijadwalkan pada %s di %s. Agenda: %s",
+		params.Judul,
+		params.Tanggal.Format("02 Jan 2006 15:04"),
+		params.Lokasi,
+		params.Agenda,
+	)
+	_, _ = db.Exec(ctx, `
+		INSERT INTO pengumuman (judul, isi, dibuat_oleh, target, division_id)
+		VALUES ($1, $2, $3, $4, $5)
+	`, notifJudul, notifIsi, string(nis), target, divID)
+
 	return &r, nil
 }
 
@@ -183,6 +203,166 @@ type UpdateStatusRapatParams struct {
 	Status string `json:"status"`
 }
 
+type UpdateRapatParams struct {
+	Judul      *string    `json:"judul,omitempty"`
+	Tanggal    *time.Time `json:"tanggal,omitempty"`
+	Lokasi     *string    `json:"lokasi,omitempty"`
+	Agenda     *string    `json:"agenda,omitempty"`
+	DivisionID *int       `json:"division_id,omitempty"`
+	Status     *string    `json:"status,omitempty"`
+}
+
+//encore:api auth path=/rapat/:id method=PUT
+func UpdateRapat(ctx context.Context, id int, params *UpdateRapatParams) (*RapatDetail, error) {
+	nisStr, _ := auth.UserID()
+	ud := auth.Data().(*user.UserData)
+
+	var dibuatOleh string
+	var divID sql.NullInt32
+	err := db.QueryRow(ctx, `SELECT dibuat_oleh, division_id FROM rapat WHERE rapat_id = $1`, id).Scan(&dibuatOleh, &divID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &errs.Error{Code: errs.NotFound, Message: "rapat tidak ditemukan"}
+		}
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+
+	canEdit := false
+	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" || ud.GroupName == "Pembina" {
+		canEdit = true
+	} else if string(nisStr) == dibuatOleh {
+		canEdit = true
+	} else if ud.GroupName == "Kepala Divisi" && divID.Valid && ud.DivisionID != nil && int(divID.Int32) == *ud.DivisionID {
+		canEdit = true
+	}
+
+	if !canEdit {
+		return nil, &errs.Error{
+			Code:    errs.PermissionDenied,
+			Message: "anda tidak memiliki izin untuk mengedit jadwal rapat ini",
+		}
+	}
+
+	if params.Status != nil {
+		valid := map[string]bool{"Terjadwal": true, "Berlangsung": true, "Selesai": true}
+		if !valid[*params.Status] {
+			return nil, &errs.Error{Code: errs.InvalidArgument, Message: "status tidak valid"}
+		}
+	}
+
+	var newDivID sql.NullInt32
+	updateDiv := false
+	if params.DivisionID != nil {
+		updateDiv = true
+		if *params.DivisionID > 0 {
+			newDivID = sql.NullInt32{Int32: int32(*params.DivisionID), Valid: true}
+		}
+	}
+
+	_, err = db.Exec(ctx, `
+		UPDATE rapat
+		SET judul = COALESCE($1, judul),
+		    tanggal = COALESCE($2, tanggal),
+		    lokasi = COALESCE($3, lokasi),
+		    agenda = COALESCE($4, agenda),
+		    division_id = CASE WHEN $5::boolean THEN $6 ELSE division_id END,
+		    status = COALESCE($7, status)
+		WHERE rapat_id = $8
+	`,
+		params.Judul,
+		params.Tanggal,
+		params.Lokasi,
+		params.Agenda,
+		updateDiv,
+		newDivID,
+		params.Status,
+		id,
+	)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+
+	// Broadcast notifikasi pembaruan jadwal
+	updatedRapat, _ := GetRapat(ctx, id)
+	if updatedRapat != nil {
+		target := "Organisasi"
+		var dID sql.NullInt32
+		if updatedRapat.DivisionID != nil {
+			target = "Divisi"
+			dID = sql.NullInt32{Int32: int32(*updatedRapat.DivisionID), Valid: true}
+		}
+		notifJudul := fmt.Sprintf("✏️ Pembaruan Jadwal Rapat: %s", updatedRapat.Judul)
+		notifIsi := fmt.Sprintf("Jadwal rapat '%s' telah diperbarui. Waktu: %s, Lokasi: %s, Status: %s. Agenda: %s",
+			updatedRapat.Judul,
+			updatedRapat.Tanggal.Format("02 Jan 2006 15:04"),
+			updatedRapat.Lokasi,
+			updatedRapat.Status,
+			updatedRapat.Agenda,
+		)
+		_, _ = db.Exec(ctx, `
+			INSERT INTO pengumuman (judul, isi, dibuat_oleh, target, division_id)
+			VALUES ($1, $2, $3, $4, $5)
+		`, notifJudul, notifIsi, string(nisStr), target, dID)
+	}
+
+	return updatedRapat, nil
+}
+
+//encore:api auth path=/rapat/:id method=DELETE
+func HapusRapat(ctx context.Context, id int) (*MessageResponse, error) {
+	nisStr, _ := auth.UserID()
+	ud := auth.Data().(*user.UserData)
+
+	var judul, dibuatOleh string
+	var divID sql.NullInt32
+	err := db.QueryRow(ctx, `SELECT judul, dibuat_oleh, division_id FROM rapat WHERE rapat_id = $1`, id).Scan(&judul, &dibuatOleh, &divID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &errs.Error{Code: errs.NotFound, Message: "rapat tidak ditemukan"}
+		}
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+
+	canDelete := false
+	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" || ud.GroupName == "Pembina" {
+		canDelete = true
+	} else if string(nisStr) == dibuatOleh {
+		canDelete = true
+	} else if ud.GroupName == "Kepala Divisi" && divID.Valid && ud.DivisionID != nil && int(divID.Int32) == *ud.DivisionID {
+		canDelete = true
+	}
+
+	if !canDelete {
+		return nil, &errs.Error{
+			Code:    errs.PermissionDenied,
+			Message: "anda tidak memiliki izin untuk menghapus jadwal rapat ini",
+		}
+	}
+
+	// Hapus presensi dan notulensi terkait
+	_, _ = db.Exec(ctx, `DELETE FROM presensi WHERE acara_type = 'Rapat' AND acara_id = $1`, id)
+	_, _ = db.Exec(ctx, `DELETE FROM notulensi WHERE rapat_id = $1`, id)
+
+	_, err = db.Exec(ctx, `DELETE FROM rapat WHERE rapat_id = $1`, id)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+
+	// Notifikasi pembatalan rapat
+	target := "Organisasi"
+	if divID.Valid {
+		target = "Divisi"
+	}
+	notifJudul := fmt.Sprintf("❌ Pembatalan Rapat: %s", judul)
+	notifIsi := fmt.Sprintf("Rapat '%s' yang sebelumnya dijadwalkan telah dibatalkan / dihapus dari agenda.", judul)
+	_, _ = db.Exec(ctx, `
+		INSERT INTO pengumuman (judul, isi, dibuat_oleh, target, division_id)
+		VALUES ($1, $2, $3, $4, $5)
+	`, notifJudul, notifIsi, string(nisStr), target, divID)
+
+	return &MessageResponse{Message: "Jadwal rapat berhasil dihapus"}, nil
+}
+
 //encore:api auth path=/rapat/:id/status method=PUT
 func UpdateStatusRapat(ctx context.Context, id int, params *UpdateStatusRapatParams) (*MessageResponse, error) {
 	nisStr, _ := auth.UserID()
@@ -192,7 +372,7 @@ func UpdateStatusRapat(ctx context.Context, id int, params *UpdateStatusRapatPar
 	}
 
 	res, err := db.Exec(ctx, `
-		UPDATE rapat SET status = $1 WHERE rapat_id = $2 AND dibuat_oleh = $3
+		UPDATE rapat SET status = $1 WHERE rapat_id = $2 AND (dibuat_oleh = $3 OR (SELECT rg.group_name FROM kepengurusan k JOIN roles r ON r.role_id = k.role_id JOIN role_groups rg ON rg.group_id = r.group_id WHERE k.nis = $3 AND k.status = 'Aktif' LIMIT 1) IN ('Sekretaris', 'Trimitra', 'Pembina'))
 	`, params.Status, id, string(nisStr))
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
@@ -207,17 +387,25 @@ func UpdateStatusRapat(ctx context.Context, id int, params *UpdateStatusRapatPar
 // NOTULENSI
 // ============================================================
 
+type NotulensiAttachment struct {
+	URL  string `json:"url"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
 type NotulensiDetail struct {
-	NotulensiID      int        `json:"notulensi_id"`
-	RapatID          int        `json:"rapat_id"`
-	Isi              string     `json:"isi"`
-	DifinalisasiOleh *string    `json:"difinalisasi_oleh"`
-	Status           string     `json:"status"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	NotulensiID      int                   `json:"notulensi_id"`
+	RapatID          int                   `json:"rapat_id"`
+	Isi              string                `json:"isi"`
+	Attachments      []NotulensiAttachment `json:"attachments"`
+	DifinalisasiOleh *string               `json:"difinalisasi_oleh"`
+	Status           string                `json:"status"`
+	UpdatedAt        time.Time             `json:"updated_at"`
 }
 
 type UpsertNotulensiParams struct {
-	Isi string `json:"isi"`
+	Isi         string                `json:"isi"`
+	Attachments []NotulensiAttachment `json:"attachments"`
 }
 
 type FinalisasiNotulensiParams struct {
@@ -234,20 +422,29 @@ func UpsertNotulensi(ctx context.Context, id int, params *UpsertNotulensiParams)
 		}
 	}
 
+	attachJSON, err := json.Marshal(params.Attachments)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: "gagal encode attachments"}
+	}
+
 	var n NotulensiDetail
 	var retFinalisasi sql.NullString
-	err := db.QueryRow(ctx, `
-		INSERT INTO notulensi (rapat_id, isi, status)
-		VALUES ($1, $2, 'Draft')
-		ON CONFLICT (rapat_id) DO UPDATE SET isi = $2, updated_at = NOW()
-		RETURNING notulensi_id, rapat_id, isi, difinalisasi_oleh, status, updated_at
-	`, id, params.Isi).
-		Scan(&n.NotulensiID, &n.RapatID, &n.Isi, &retFinalisasi, &n.Status, &n.UpdatedAt)
+	var attachStr string
+	err = db.QueryRow(ctx, `
+		INSERT INTO notulensi (rapat_id, isi, attachments, status)
+		VALUES ($1, $2, $3, 'Draft')
+		ON CONFLICT (rapat_id) DO UPDATE SET isi = $2, attachments = $3, updated_at = NOW()
+		RETURNING notulensi_id, rapat_id, isi, attachments, difinalisasi_oleh, status, updated_at
+	`, id, params.Isi, string(attachJSON)).
+		Scan(&n.NotulensiID, &n.RapatID, &n.Isi, &attachStr, &retFinalisasi, &n.Status, &n.UpdatedAt)
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}
 	if retFinalisasi.Valid {
 		n.DifinalisasiOleh = &retFinalisasi.String
+	}
+	if err2 := json.Unmarshal([]byte(attachStr), &n.Attachments); err2 != nil {
+		n.Attachments = []NotulensiAttachment{}
 	}
 	return &n, nil
 }
@@ -266,12 +463,13 @@ func FinalisasiNotulensi(ctx context.Context, id int) (*NotulensiDetail, error) 
 
 	var n NotulensiDetail
 	var retFinalisasi sql.NullString
+	var attachStr string
 	err := db.QueryRow(ctx, `
 		UPDATE notulensi SET status = 'Final', difinalisasi_oleh = $1, updated_at = NOW()
 		WHERE rapat_id = $2
-		RETURNING notulensi_id, rapat_id, isi, difinalisasi_oleh, status, updated_at
+		RETURNING notulensi_id, rapat_id, isi, attachments, difinalisasi_oleh, status, updated_at
 	`, string(nis), id).
-		Scan(&n.NotulensiID, &n.RapatID, &n.Isi, &retFinalisasi, &n.Status, &n.UpdatedAt)
+		Scan(&n.NotulensiID, &n.RapatID, &n.Isi, &attachStr, &retFinalisasi, &n.Status, &n.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &errs.Error{Code: errs.NotFound, Message: "notulensi tidak ditemukan"}
@@ -281,6 +479,9 @@ func FinalisasiNotulensi(ctx context.Context, id int) (*NotulensiDetail, error) 
 	if retFinalisasi.Valid {
 		n.DifinalisasiOleh = &retFinalisasi.String
 	}
+	if err2 := json.Unmarshal([]byte(attachStr), &n.Attachments); err2 != nil {
+		n.Attachments = []NotulensiAttachment{}
+	}
 	return &n, nil
 }
 
@@ -288,10 +489,11 @@ func FinalisasiNotulensi(ctx context.Context, id int) (*NotulensiDetail, error) 
 func GetNotulensi(ctx context.Context, id int) (*NotulensiDetail, error) {
 	var n NotulensiDetail
 	var retFinalisasi sql.NullString
+	var attachStr string
 	err := db.QueryRow(ctx, `
-		SELECT notulensi_id, rapat_id, isi, difinalisasi_oleh, status, updated_at
+		SELECT notulensi_id, rapat_id, isi, attachments, difinalisasi_oleh, status, updated_at
 		FROM notulensi WHERE rapat_id = $1
-	`, id).Scan(&n.NotulensiID, &n.RapatID, &n.Isi, &retFinalisasi, &n.Status, &n.UpdatedAt)
+	`, id).Scan(&n.NotulensiID, &n.RapatID, &n.Isi, &attachStr, &retFinalisasi, &n.Status, &n.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &errs.Error{Code: errs.NotFound, Message: "notulensi belum ada"}
@@ -301,7 +503,44 @@ func GetNotulensi(ctx context.Context, id int) (*NotulensiDetail, error) {
 	if retFinalisasi.Valid {
 		n.DifinalisasiOleh = &retFinalisasi.String
 	}
+	if err2 := json.Unmarshal([]byte(attachStr), &n.Attachments); err2 != nil {
+		n.Attachments = []NotulensiAttachment{}
+	}
 	return &n, nil
+}
+
+type UploadNotulensiFileParams struct {
+	FileName    string `json:"file_name"`
+	FileType    string `json:"file_type"`
+	FileDataB64 string `json:"file_data_b64"`
+}
+
+type UploadNotulensiFileResponse struct {
+	URL      string `json:"url"`
+	Name     string `json:"name"`
+	FileType string `json:"file_type"`
+}
+
+//encore:api auth path=/rapat/:id/notulensi/upload method=POST
+func UploadNotulensiFile(ctx context.Context, id int, params *UploadNotulensiFileParams) (*UploadNotulensiFileResponse, error) {
+	ud := auth.Data().(*user.UserData)
+	if ud.GroupName != "Sekretaris" && ud.GroupName != "Trimitra" {
+		return nil, &errs.Error{
+			Code:    errs.PermissionDenied,
+			Message: "hanya Sekretaris atau Trimitra yang dapat mengunggah file notulensi",
+		}
+	}
+	if params.FileName == "" || params.FileDataB64 == "" {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "file_name dan file_data_b64 wajib diisi"}
+	}
+
+	dataURL := fmt.Sprintf("data:%s;base64,%s", params.FileType, params.FileDataB64)
+
+	return &UploadNotulensiFileResponse{
+		URL:      dataURL,
+		Name:     params.FileName,
+		FileType: params.FileType,
+	}, nil
 }
 
 // ============================================================
