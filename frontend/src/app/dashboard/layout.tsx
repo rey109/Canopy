@@ -33,7 +33,7 @@ export default function DashboardLayout({
 
   return (
     <div className="flex min-h-screen">
-      {/* Desktop Sidebar */}
+      {/* Desktop Sidebar — hidden on mobile */}
       <div className="hidden md:block">
         <Sidebar />
       </div>

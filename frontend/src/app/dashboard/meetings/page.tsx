@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import QRCode from "qrcode";
 import { api, type RapatDetail, type UserDetail, type DivisionDetail, type ProkerDetail, type NotulensiAttachment } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -12,18 +10,21 @@ interface AttendanceEntry {
   status: string; // 'hadir', 'izin', 'sakit', 'alfa'
 }
 
-const STATUS_BADGE: Record<string, string> = {
-  Terjadwal: "badge-neutral",
-  Berlangsung: "badge-info",
-  Selesai: "badge-success",
-  Dibatalkan: "badge-error",
-};
-
 // Opsi Target Role / Peserta secara terperinci
 export const TARGET_ROLE_OPTIONS = [
   { value: "TRIMITRA", label: "👑 TRIMITRA (Ketua OSIS, Wakil 1 & 2)", group: "Pimpinan & Inti", divisionId: null, badgeColor: "border-amber-500/40 text-amber-300 bg-amber-500/10" },
   { value: "BPH", label: "🏛️ BPH (Trimitra, Sekretaris, Bendahara)", group: "Pimpinan & Inti", divisionId: null, badgeColor: "border-purple-500/40 text-purple-300 bg-purple-500/10" },
   { value: "SEMUA_SEKBID", label: "🌐 SEMUA SEKBID (Seluruh Pengurus 1-10 & Anggota)", group: "Organisasi Penuh", divisionId: null, badgeColor: "border-emerald-500/40 text-emerald-300 bg-emerald-500/10" },
+  { value: "SEKBID_1", label: "🏢 SEKBID 1: Pembinaan Keimanan & Ketaqwaan Terhadap Tuhan YME", group: "Seksi Bidang 1 s.d 10", divisionId: 1, badgeColor: "border-blue-500/40 text-blue-300 bg-blue-500/10" },
+  { value: "SEKBID_2", label: "🏢 SEKBID 2: Pembinaan Budi Pekerti Luhur / Akhlak Mulia", group: "Seksi Bidang 1 s.d 10", divisionId: 2, badgeColor: "border-blue-500/40 text-blue-300 bg-blue-500/10" },
+  { value: "SEKBID_3", label: "🏢 SEKBID 3: Pembinaan Wawasan Kebangsaan & Bela Negara", group: "Seksi Bidang 1 s.d 10", divisionId: 3, badgeColor: "border-blue-500/40 text-blue-300 bg-blue-500/10" },
+  { value: "SEKBID_4", label: "🏢 SEKBID 4: Pembinaan Prestasi Akademik, Seni, & Olahraga", group: "Seksi Bidang 1 s.d 10", divisionId: 4, badgeColor: "border-blue-500/40 text-blue-300 bg-blue-500/10" },
+  { value: "SEKBID_5", label: "🏢 SEKBID 5: Demokrasi, HAM, Politik, & Lingkungan Hidup", group: "Seksi Bidang 1 s.d 10", divisionId: 5, badgeColor: "border-blue-500/40 text-blue-300 bg-blue-500/10" },
+  { value: "SEKBID_6", label: "🏢 SEKBID 6: Pembinaan Kreativitas, Keterampilan, Kewirausahaan", group: "Seksi Bidang 1 s.d 10", divisionId: 6, badgeColor: "border-blue-500/40 text-blue-300 bg-blue-500/10" },
+  { value: "SEKBID_7", label: "🏢 SEKBID 7: Pembinaan Kualitas Jasmani, Kesehatan, & Gizi", group: "Seksi Bidang 1 s.d 10", divisionId: 7, badgeColor: "border-blue-500/40 text-blue-300 bg-blue-500/10" },
+  { value: "SEKBID_8", label: "🏢 SEKBID 8: Pembinaan Sastra & Budaya", group: "Seksi Bidang 1 s.d 10", divisionId: 8, badgeColor: "border-blue-500/40 text-blue-300 bg-blue-500/10" },
+  { value: "SEKBID_9", label: "🏢 SEKBID 9: Pembinaan Teknologi Informasi & Komunikasi (TIK)", group: "Seksi Bidang 1 s.d 10", divisionId: 9, badgeColor: "border-blue-500/40 text-blue-300 bg-blue-500/10" },
+  { value: "SEKBID_10", label: "🏢 SEKBID 10: Pembinaan Komunikasi Bahasa Asing", group: "Seksi Bidang 1 s.d 10", divisionId: 10, badgeColor: "border-blue-500/40 text-blue-300 bg-blue-500/10" },
 ];
 
 export default function MeetingsPage() {
@@ -35,9 +36,9 @@ export default function MeetingsPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState("");
 
-  const [filterStatus, setFilterStatus] = useState<"Semua" | "Terjadwal" | "Berlangsung" | "Selesai" | "Dibatalkan">("Semua");
+  // Filter list
+  const [filterStatus, setFilterStatus] = useState<"Semua" | "Terjadwal" | "Berlangsung" | "Selesai">("Semua");
   const [filterTarget, setFilterTarget] = useState<string>("Semua");
 
   // Form State for creating meeting
@@ -45,8 +46,7 @@ export default function MeetingsPage() {
   const [tanggal, setTanggal] = useState("");
   const [lokasi, setLokasi] = useState("");
   const [agenda, setAgenda] = useState("");
-  const [divisionId, setDivisionId] = useState("");
-  const [prokerId, setProkerId] = useState("");
+  const [targetAudience, setTargetAudience] = useState("SEMUA_SEKBID");
 
   // Form State for editing meeting
   const [editingMeeting, setEditingMeeting] = useState<RapatDetail | null>(null);
@@ -54,6 +54,8 @@ export default function MeetingsPage() {
   const [editTanggal, setEditTanggal] = useState("");
   const [editLokasi, setEditLokasi] = useState("");
   const [editAgenda, setEditAgenda] = useState("");
+  const [editTarget, setEditTarget] = useState("SEMUA_SEKBID");
+  const [editStatus, setEditStatus] = useState("Terjadwal");
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
@@ -71,9 +73,6 @@ export default function MeetingsPage() {
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
   const [uploadingFile, setUploadingFile] = useState(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // QR code image URLs (keyed by rapat_id)
-  const [qrImages, setQrImages] = useState<Record<number, string>>({});
 
   const fetchMeetingsData = async () => {
     setLoading(true);
@@ -100,30 +99,7 @@ export default function MeetingsPage() {
     fetchMeetingsData();
   }, [user]);
 
-  // Generate QR code images when meetings change
-  useEffect(() => {
-    const generateQRCodes = async () => {
-      const newQrImages: Record<number, string> = {};
-      for (const m of meetings) {
-        if (m.qr_code) {
-          try {
-            const dataUrl = await QRCode.toDataURL(m.qr_code, {
-              width: 256,
-              margin: 2,
-              color: { dark: "#1e293b", light: "#ffffff" },
-            });
-            newQrImages[m.rapat_id] = dataUrl;
-          } catch (e) {
-            console.error("QR gen error:", e);
-          }
-        }
-      }
-      setQrImages(newQrImages);
-    };
-    if (meetings.length > 0) generateQRCodes();
-  }, [meetings]);
-
-  // Format tanggal dan jam yang tahan banting
+  // Format tanggal dan jam yang tahan banting (tidak akan pernah hilang/NaN)
   const formatDateTime = (dateVal: string | Date | undefined | null) => {
     if (!dateVal) return "Waktu belum ditentukan";
     try {
@@ -140,7 +116,8 @@ export default function MeetingsPage() {
         d.toLocaleTimeString("id-ID", {
           hour: "2-digit",
           minute: "2-digit",
-        })
+        }) +
+        " WIB"
       );
     } catch {
       return String(dateVal);
@@ -150,92 +127,145 @@ export default function MeetingsPage() {
   // Helper untuk menentukan label & badge target rapat
   const getMeetingTargetInfo = (m: RapatDetail) => {
     if (m.division_id) {
-      return { label: `SEKBID ${m.division_id}`, fullLabel: getDivisionName(m.division_id), badgeClass: "border-blue-500/40 text-blue-300 bg-blue-500/10" };
+      const found = TARGET_ROLE_OPTIONS.find((t) => t.divisionId === m.division_id);
+      if (found) return { label: `SEKBID ${m.division_id}`, fullLabel: found.label, badgeClass: found.badgeColor };
+      return { label: `SEKBID ${m.division_id}`, fullLabel: `Sekbid ${m.division_id}`, badgeClass: "border-blue-500/40 text-blue-300 bg-blue-500/10" };
+    }
+    const upTitle = (m.judul || "").toUpperCase();
+    const upAgenda = (m.agenda || "").toUpperCase();
+    if (upTitle.includes("TRIMITRA") || upAgenda.includes("TRIMITRA")) {
+      return { label: "TRIMITRA", fullLabel: "👑 TRIMITRA (Ketua & Wakil)", badgeClass: "border-amber-500/40 text-amber-300 bg-amber-500/10" };
+    }
+    if (upTitle.includes("BPH") || upAgenda.includes("BPH")) {
+      return { label: "BPH", fullLabel: "🏛️ BPH (Trimitra, Sekre, Bendum)", badgeClass: "border-purple-500/40 text-purple-300 bg-purple-500/10" };
     }
     return { label: "SEMUA SEKBID", fullLabel: "🌐 SEMUA SEKBID (Seluruh Pengurus)", badgeClass: "border-emerald-500/40 text-emerald-300 bg-emerald-500/10" };
   };
 
-  const getDivisionName = (id: number | null) => {
-    if (!id) return "Organisasi";
-    return divisions.find((d) => d.division_id === id)?.division_name || `Divisi ${id}`;
-  };
-
-  const getProkerName = (id: number | null) => {
-    if (!id) return null;
-    return prokers.find((p) => p.proker_id === id)?.nama || null;
-  };
-
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!tanggal) {
+      alert("Harap pilih tanggal dan waktu rapat.");
+      return;
+    }
     setSubmitting(true);
-    setSubmitError("");
     try {
+      const selected = TARGET_ROLE_OPTIONS.find((t) => t.value === targetAudience);
+      const divId = selected?.divisionId || undefined;
+
+      let cleanJudul = judul.trim();
+      if (targetAudience === "TRIMITRA" && !cleanJudul.toUpperCase().includes("TRIMITRA")) {
+        cleanJudul = `[TRIMITRA] ${cleanJudul}`;
+      } else if (targetAudience === "BPH" && !cleanJudul.toUpperCase().includes("BPH")) {
+        cleanJudul = `[BPH] ${cleanJudul}`;
+      }
+
       await api.createMeeting({
-        judul,
+        judul: cleanJudul,
         tanggal: new Date(tanggal).toISOString(),
         lokasi,
         agenda,
-        division_id: divisionId ? Number(divisionId) : undefined,
-        proker_id: prokerId ? Number(prokerId) : undefined,
+        division_id: divId,
       });
+
       setShowModal(false);
       setJudul("");
       setTanggal("");
       setLokasi("");
       setAgenda("");
-      setDivisionId("");
-      setProkerId("");
+      setTargetAudience("SEMUA_SEKBID");
       fetchMeetingsData();
     } catch (err: any) {
-      console.error("Gagal menyimpan rapat:", err);
-      setSubmitError(err.message || "Gagal menjadwalkan rapat. Periksa koneksi ke server.");
+      alert("Gagal menjadwalkan rapat: " + err.message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  const canEditMeeting = (m: RapatDetail) => {
-    if (isStaf) return false;
-    if (user?.group_name === "Trimitra" || user?.group_name === "Pembina") return true;
-    if (user?.group_name === "Sekretaris") return true;
-    return m.dibuat_oleh === user?.nis;
-  };
-
   const handleOpenEdit = (m: RapatDetail) => {
     setEditingMeeting(m);
     setEditJudul(m.judul);
-    const d = new Date(m.tanggal);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    setEditTanggal(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+
+    if (m.tanggal) {
+      try {
+        const d = new Date(m.tanggal);
+        if (!isNaN(d.getTime())) {
+          const localIso = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+            .toISOString()
+            .slice(0, 16);
+          setEditTanggal(localIso);
+        } else {
+          setEditTanggal("");
+        }
+      } catch {
+        setEditTanggal("");
+      }
+    } else {
+      setEditTanggal("");
+    }
+
     setEditLokasi(m.lokasi || "");
     setEditAgenda(m.agenda || "");
+
+    if (m.division_id) {
+      setEditTarget(`SEKBID_${m.division_id}`);
+    } else if (m.judul?.toUpperCase().includes("TRIMITRA")) {
+      setEditTarget("TRIMITRA");
+    } else if (m.judul?.toUpperCase().includes("BPH")) {
+      setEditTarget("BPH");
+    } else {
+      setEditTarget("SEMUA_SEKBID");
+    }
+
+    setEditStatus(m.status || "Terjadwal");
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingMeeting) return;
+    if (!editTanggal) {
+      alert("Harap tentukan tanggal dan waktu rapat.");
+      return;
+    }
     setSavingEdit(true);
     try {
+      const selected = TARGET_ROLE_OPTIONS.find((t) => t.value === editTarget);
+      const divId = selected?.divisionId || null;
+
       await api.updateMeeting(editingMeeting.rapat_id, {
         judul: editJudul,
         tanggal: new Date(editTanggal).toISOString(),
         lokasi: editLokasi,
         agenda: editAgenda,
+        division_id: divId,
+        status: editStatus,
       });
+
+      alert("Jadwal rapat berhasil diperbarui!");
       setEditingMeeting(null);
       fetchMeetingsData();
     } catch (err: any) {
-      alert("Gagal memperbarui rapat: " + err.message);
+      alert("Gagal memperbarui jadwal rapat: " + err.message);
     } finally {
       setSavingEdit(false);
     }
   };
 
-  const handleDeleteMeeting = async (id: number, judul: string) => {
-    if (!confirm(`Hapus jadwal rapat "${judul}"? Tindakan ini tidak dapat dibatalkan.`)) return;
+  const handleDeleteMeeting = async (id: number, title: string) => {
+    if (
+      !confirm(
+        `Apakah Anda yakin ingin menghapus jadwal rapat "${title}"?\n\nNotifikasi pembatalan rapat akan otomatis disiarkan ke seluruh peserta.`
+      )
+    ) {
+      return;
+    }
     setDeletingId(id);
     try {
       await api.deleteMeeting(id);
+      alert(`Jadwal rapat "${title}" berhasil dihapus.`);
+      if (editingMeeting?.rapat_id === id) {
+        setEditingMeeting(null);
+      }
       fetchMeetingsData();
     } catch (err: any) {
       alert("Gagal menghapus rapat: " + err.message);
@@ -244,12 +274,22 @@ export default function MeetingsPage() {
     }
   };
 
+  const canEditMeeting = (m: RapatDetail) => {
+    if (!user) return false;
+    const g = user.group_name;
+    if (g === "Sekretaris" || g === "Trimitra" || g === "Pembina") return true;
+    if (m.dibuat_oleh === user.nis) return true;
+    if (g === "Kepala Divisi" && user.division_id && m.division_id === user.division_id) return true;
+    return false;
+  };
+
   const handleOpenAttendance = async (m: RapatDetail) => {
     setSelectedMeeting(m);
     setAttendanceList([]);
     try {
       const aRes = await api.listPresensiRapat(m.rapat_id).catch(() => ({ presensi: [] }));
       const current = aRes.presensi || [];
+
       const populated = userList.map((u) => {
         const att = current.find((a) => a.nis === u.nis);
         return {
@@ -270,7 +310,7 @@ export default function MeetingsPage() {
     try {
       const entries = attendanceList.map((a) => ({
         user_nis: a.user_nis,
-        status: a.status === "hadir" ? "hadir" : a.status === "izin" ? "izin" : a.status === "sakit" ? "sakit" : "alfa",
+        status: a.status === "hadir" ? "hadir" : a.status === "izin" ? "izin" : "alfa",
       }));
       await api.recordAttendance(selectedMeeting.rapat_id, { entries });
       alert("Absensi rapat berhasil disimpan!");
@@ -288,7 +328,6 @@ export default function MeetingsPage() {
     );
   };
 
-  // Notulensi handlers
   const handleOpenNotulensi = async (m: RapatDetail) => {
     setNotulensiMeeting(m);
     setNotulensiIsi("");
@@ -331,7 +370,7 @@ export default function MeetingsPage() {
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      const att: NotulensiAttachment = { url: dataUrl, nama: file.name, tipe: file.type || "application/octet-stream" };
+      const att: NotulensiAttachment = { url: dataUrl, name: file.name, type: file.type || "application/octet-stream" };
       const newAttachments = [...notulensiAttachments, att];
       setNotulensiAttachments(newAttachments);
       await api.upsertNotulensi(notulensiMeeting.rapat_id, notulensiIsi, newAttachments);
@@ -375,7 +414,6 @@ export default function MeetingsPage() {
       await api.finalisasiNotulensi(notulensiMeeting.rapat_id);
       alert("Notulensi berhasil difinalisasi!");
       setNotulensiMeeting(null);
-      fetchMeetingsData();
     } catch (err: any) {
       alert("Gagal finalisasi notulensi: " + err.message);
     } finally {
@@ -388,19 +426,26 @@ export default function MeetingsPage() {
   const filteredMeetings = meetings.filter((m) => {
     if (filterStatus !== "Semua" && m.status !== filterStatus) return false;
     if (filterTarget !== "Semua") {
-      const info = getMeetingTargetInfo(m);
-      if (info.label !== filterTarget && !info.fullLabel.includes(filterTarget)) return false;
+      const targetInfo = getMeetingTargetInfo(m);
+      if (filterTarget === "TRIMITRA" && targetInfo.label !== "TRIMITRA") return false;
+      if (filterTarget === "BPH" && targetInfo.label !== "BPH") return false;
+      if (filterTarget === "SEMUA_SEKBID" && targetInfo.label !== "SEMUA SEKBID") return false;
+      if (filterTarget.startsWith("SEKBID_")) {
+        const num = Number(filterTarget.replace("SEKBID_", ""));
+        if (m.division_id !== num) return false;
+      }
     }
     return true;
   });
 
   return (
     <div className="animate-fade-in space-y-6">
+      {/* Header Halaman */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Rapat & Kegiatan</h1>
           <p className="text-[var(--text-secondary)] text-sm mt-1">
-            Jadwalkan rapat divisi atau organisasi, rekam notulensi, dan catat kehadiran
+            Manajemen agenda rapat, jadwal kegiatan, absensi QR, dan notulensi organisasi.
           </p>
         </div>
         {!isStaf && (
@@ -417,7 +462,7 @@ export default function MeetingsPage() {
       {/* Filter Tabs Status & Target */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[var(--border)] pb-2">
         <div className="flex gap-1 overflow-x-auto pb-1">
-          {(["Semua", "Terjadwal", "Berlangsung", "Selesai", "Dibatalkan"] as const).map((status) => (
+          {(["Semua", "Terjadwal", "Berlangsung", "Selesai"] as const).map((status) => (
             <button
               key={status}
               onClick={() => setFilterStatus(status)}
@@ -441,32 +486,41 @@ export default function MeetingsPage() {
             className="input-field py-1 px-2.5 text-xs bg-[var(--bg-primary)] max-w-[240px]"
           >
             <option value="Semua">Semua Target</option>
-            <option value="SEMUA SEKBID">🌐 Semua Sekbid</option>
-            {[...new Set(divisions.map((d) => d.division_name))].map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
+            <option value="TRIMITRA">👑 TRIMITRA</option>
+            <option value="BPH">🏛️ BPH</option>
+            <option value="SEMUA_SEKBID">🌐 SEMUA SEKBID</option>
+            <optgroup label="Seksi Bidang 1 s.d 10">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <option key={i + 1} value={`SEKBID_${i + 1}`}>
+                  🏢 SEKBID {i + 1}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </div>
       </div>
 
+      {/* Daftar Kartu Rapat */}
       {loading ? (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {[1, 2].map((i) => (
-            <div key={i} className="glass-card p-5 animate-pulse">
-              <div className="h-5 w-48 bg-[var(--border)] rounded mb-2" />
-              <div className="h-4 w-full bg-[var(--border)] rounded" />
+            <div key={i} className="glass-card p-5 animate-pulse space-y-3">
+              <div className="h-4 w-32 bg-[var(--border)] rounded" />
+              <div className="h-6 w-3/4 bg-[var(--border)] rounded" />
+              <div className="h-8 w-full bg-[var(--border)] rounded" />
             </div>
           ))}
         </div>
       ) : filteredMeetings.length === 0 ? (
-        <div className="glass-card p-12 text-center text-[var(--text-muted)]">
-          Belum ada rapat dengan status ini.
+        <div className="glass-card p-12 text-center text-[var(--text-muted)] space-y-2">
+          <p className="text-2xl">📅</p>
+          <p className="font-semibold text-sm">Belum ada rapat dengan filter yang dipilih.</p>
+          <p className="text-xs">Klik tombol "Jadwalkan Rapat" di kanan atas untuk membuat jadwal baru.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 stagger-children">
           {filteredMeetings.map((m) => {
             const targetInfo = getMeetingTargetInfo(m);
-            const prokerName = getProkerName(m.proker_id);
             return (
               <div key={m.rapat_id} className="glass-card p-5 flex flex-col justify-between hover:border-[var(--accent)]/40 transition-all border border-[var(--border)] shadow-lg">
                 <div>
@@ -475,46 +529,42 @@ export default function MeetingsPage() {
                     <span className={`text-[11px] px-2.5 py-1 rounded-full border font-bold ${targetInfo.badgeClass}`}>
                       {targetInfo.fullLabel}
                     </span>
-                    <span className={`badge text-[11px] font-bold ${STATUS_BADGE[m.status] || "badge-neutral"}`}>
+                    <span className={`badge text-[11px] font-bold ${m.status === "Selesai" ? "badge-success" : m.status === "Berlangsung" ? "badge-info" : "badge-neutral"}`}>
                       {m.status}
                     </span>
                   </div>
 
                   {/* Judul Rapat */}
-                  <h3 className="font-bold text-lg mb-2 line-clamp-2">{m.judul}</h3>
+                  <h3 className="font-bold text-lg text-white mb-2 line-clamp-2">{m.judul}</h3>
 
-                  {/* TANGGAL & WAKTU */}
+                  {/* TANGGAL & WAKTU (Paling Jelas, Menonjol, dan Terformat Rapi) */}
                   <div className="flex items-center gap-2 text-xs sm:text-sm text-cyan-300 font-semibold mb-3 bg-cyan-950/40 px-3 py-2 rounded-xl border border-cyan-500/30">
                     <span className="text-base">🗓️</span>
                     <span>{formatDateTime(m.tanggal)}</span>
                   </div>
 
-                  {/* Lokasi, Divisi, Proker & Agenda */}
+                  {/* Lokasi & Agenda */}
                   <div className="space-y-1.5 mb-4 text-xs">
                     <p className="text-[var(--text-secondary)] flex items-center gap-1.5">
                       <span className="text-sm">📍</span>
                       <span className="font-semibold text-[var(--text-muted)]">Lokasi:</span>
-                      <span className="font-medium">{m.lokasi || "Belum ditentukan"}</span>
+                      <span className="text-white font-medium">{m.lokasi || "Belum ditentukan"}</span>
                     </p>
-                    {m.proker_id && prokerName && (
-                      <p className="text-[var(--accent)] flex items-center gap-1.5">
-                        <span className="text-sm">📋</span>
-                        <span>{prokerName}</span>
-                      </p>
-                    )}
                     <p className="text-[var(--text-secondary)] flex items-start gap-1.5">
                       <span className="text-sm">📝</span>
                       <span className="font-semibold text-[var(--text-muted)] shrink-0">Agenda:</span>
-                      <span className="line-clamp-2">{m.agenda || "Tidak ada rincian agenda"}</span>
+                      <span className="text-[var(--text-secondary)] line-clamp-2">{m.agenda || "Tidak ada rincian agenda"}</span>
                     </p>
                   </div>
 
-                  {/* QR Code gambar jika tersedia */}
-                  {m.qr_code && qrImages[m.rapat_id] && (
-                    <div className="p-3 bg-[var(--bg-primary)] rounded-xl border border-[var(--border)] mb-4 flex flex-col items-center">
-                      <p className="text-[10px] text-[var(--text-muted)] font-semibold uppercase mb-2">QR Code Presensi — Pajang di Proyektor</p>
-                      <img src={qrImages[m.rapat_id]} alt={`QR Rapat ${m.judul}`} className="w-44 h-44" />
-                      <p className="text-[10px] text-[var(--text-muted)] mt-2">Peserta scan QR ini untuk presensi Hadir/Izin/Sakit</p>
+                  {/* QR Code Banner jika tersedia */}
+                  {m.qr_code && (
+                    <div className="p-3 bg-[var(--bg-primary)] rounded-xl border border-[var(--border)] mb-4 flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">Token QR Presensi</p>
+                        <p className="text-xs font-mono font-bold text-[var(--accent)] select-all mt-0.5">{m.qr_code}</p>
+                      </div>
+                      <span className="text-xs px-2 py-1 rounded bg-[var(--accent)]/10 text-[var(--accent)] font-semibold">Aktif</span>
                     </div>
                   )}
                 </div>
@@ -538,14 +588,12 @@ export default function MeetingsPage() {
                         </button>
                       </>
                     )}
-                    {!isStaf && (
-                      <button onClick={() => handleOpenAttendance(m)} className="btn-secondary text-xs py-1.5 px-2.5">
-                        Absensi
-                      </button>
-                    )}
-                    <Link href={`/dashboard/meetings/${m.rapat_id}`} className="btn-primary text-xs py-1.5 px-2.5">
-                      Detail
-                    </Link>
+                    <button onClick={() => handleOpenAttendance(m)} className="btn-secondary text-xs py-1.5 px-2.5">
+                      Absensi
+                    </button>
+                    <button onClick={() => handleOpenNotulensi(m)} className="btn-primary text-xs py-1.5 px-2.5">
+                      Notulensi
+                    </button>
                   </div>
                 </div>
               </div>
@@ -661,11 +709,11 @@ export default function MeetingsPage() {
                 <div className="space-y-1.5">
                   <p className="text-xs font-semibold text-[var(--text-secondary)]">Lampiran ({notulensiAttachments.length})</p>
                   {notulensiAttachments.map((att, idx) => {
-                    const isImage = att.tipe.startsWith("image/");
+                    const isImage = att.type.startsWith("image/");
                     return (
                       <div key={idx} className="flex items-center gap-2 p-2 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)]">
                         {isImage ? (
-                          <img src={att.url} alt={att.nama} className="w-10 h-10 object-cover rounded" />
+                          <img src={att.url} alt={att.name} className="w-10 h-10 object-cover rounded" />
                         ) : (
                           <div className="w-10 h-10 flex items-center justify-center rounded bg-[var(--bg-secondary)] text-lg">
                             📄
@@ -673,12 +721,12 @@ export default function MeetingsPage() {
                         )}
                         <a
                           href={att.url}
-                          download={att.nama}
+                          download={att.name}
                           target="_blank"
                           rel="noreferrer"
                           className="flex-1 min-w-0 text-xs text-[var(--accent)] hover:underline truncate"
                         >
-                          {att.nama}
+                          {att.name}
                         </a>
                         {notulensiStatus !== "Final" && !isStaf && (
                           <button
@@ -698,9 +746,6 @@ export default function MeetingsPage() {
               <button onClick={() => setNotulensiMeeting(null)} className="btn-secondary text-xs">Tutup</button>
               {notulensiStatus !== "Final" && !isStaf && (
                 <>
-                  <Link href={`/dashboard/meetings/${notulensiMeeting.rapat_id}`} className="btn-secondary text-xs">
-                    Detail Lengkap
-                  </Link>
                   <button onClick={handleSaveNotulensi} disabled={savingNotulensi} className="btn-secondary text-xs">
                     Simpan Draft
                   </button>
@@ -719,41 +764,69 @@ export default function MeetingsPage() {
       {/* Schedule Meeting Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="glass-card p-6 w-full max-w-md space-y-4">
+          <div className="glass-card p-6 w-full max-w-md space-y-4 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-semibold">📅 Jadwalkan Rapat Baru</h3>
+            <div className="p-2.5 rounded-lg bg-[var(--accent)]/10 border border-[var(--accent)]/20 text-xs text-[var(--accent)] flex items-center gap-2">
+              <span>📢</span>
+              <span>Notifikasi rapat otomatis akan disiarkan ke feed peserta yang dituju.</span>
+            </div>
             <form onSubmit={handleCreate} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Judul Rapat</label>
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Target Peserta / Role</label>
+                <select
+                  value={targetAudience}
+                  onChange={(e) => setTargetAudience(e.target.value)}
+                  className="input-field bg-[var(--bg-primary)] font-medium text-xs"
+                >
+                  <optgroup label="Tingkat Pimpinan & BPH">
+                    <option value="TRIMITRA">👑 TRIMITRA (Ketua OSIS, Wakil 1 & 2)</option>
+                    <option value="BPH">🏛️ BPH (Trimitra, Sekretaris, Bendahara)</option>
+                  </optgroup>
+                  <optgroup label="Tingkat Organisasi">
+                    <option value="SEMUA_SEKBID">🌐 SEMUA SEKBID (Seluruh Pengurus 1-10 & Anggota)</option>
+                  </optgroup>
+                  <optgroup label="Seksi Bidang 1 s.d 10">
+                    {TARGET_ROLE_OPTIONS.filter((t) => t.group === "Seksi Bidang 1 s.d 10").map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Judul Rapat</label>
                 <input
                   type="text"
                   value={judul}
                   onChange={(e) => setJudul(e.target.value)}
-                  placeholder="Contoh: Rapat Koordinasi Program Kerja Bidang 9"
-                  className="input-field"
+                  placeholder="Contoh: Rapat Koordinasi Program Kerja"
+                  className="input-field text-sm"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Lokasi</label>
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Lokasi Rapat</label>
                 <input
                   type="text"
                   value={lokasi}
                   onChange={(e) => setLokasi(e.target.value)}
-                  placeholder="Contoh: Ruang OSIS atau Lapangan Basket"
-                  className="input-field"
+                  placeholder="Contoh: Ruang OSIS atau Lab Komputer"
+                  className="input-field text-sm"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Agenda Pembahasan</label>
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Agenda Pembahasan</label>
                 <textarea
                   rows={2}
                   value={agenda}
                   onChange={(e) => setAgenda(e.target.value)}
-                  placeholder="Contoh: Pemilihan panitia classmeeting"
-                  className="input-field resize-none"
+                  placeholder="Contoh: Pemilihan panitia classmeeting dan timeline kegiatan"
+                  className="input-field resize-none text-sm"
                   required
                 ></textarea>
               </div>
@@ -769,47 +842,12 @@ export default function MeetingsPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Divisi (Opsional)</label>
-                  <select
-                    value={divisionId}
-                    onChange={(e) => setDivisionId(e.target.value)}
-                    className="input-field bg-[var(--bg-primary)]"
-                  >
-                    <option value="">Organisasi (Semua)</option>
-                    {divisions.map((d) => (
-                      <option key={d.division_id} value={d.division_id}>{d.division_name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Proker (Opsional)</label>
-                  <select
-                    value={prokerId}
-                    onChange={(e) => setProkerId(e.target.value)}
-                    className="input-field bg-[var(--bg-primary)]"
-                  >
-                    <option value="">— Pilih Proker —</option>
-                    {prokers.map((p) => (
-                      <option key={p.proker_id} value={p.proker_id}>{p.nama}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {submitError && (
-                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-400">
-                  ⚠️ {submitError}
-                </div>
-              )}
-
               <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border)]">
-                <button type="button" onClick={() => { setShowModal(false); setSubmitError(""); }} className="btn-secondary text-xs">
+                <button type="button" onClick={() => setShowModal(false)} className="btn-secondary text-xs">
                   Batal
                 </button>
                 <button type="submit" disabled={submitting} className="btn-primary text-xs">
-                  {submitting ? "Menjadwalkan..." : "Simpan Jadwal"}
+                  {submitting ? "Menjadwalkan..." : "Simpan & Siarkan"}
                 </button>
               </div>
             </form>
@@ -820,32 +858,114 @@ export default function MeetingsPage() {
       {/* Edit Meeting Modal */}
       {editingMeeting !== null && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="glass-card p-6 w-full max-w-md space-y-4">
-            <h3 className="text-lg font-semibold">✏️ Edit Rapat</h3>
+          <div className="glass-card p-6 w-full max-w-md space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">✏️ Edit Jadwal Rapat</h3>
+              <span className="text-xs text-[var(--text-muted)] font-mono">#{editingMeeting.rapat_id}</span>
+            </div>
+            <div className="p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-400 flex items-center gap-2">
+              <span>📢</span>
+              <span>Perubahan jadwal akan otomatis dikirimkan sebagai notifikasi ke peserta.</span>
+            </div>
             <form onSubmit={handleSaveEdit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Judul Rapat</label>
-                <input type="text" value={editJudul} onChange={(e) => setEditJudul(e.target.value)} className="input-field" required />
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Target Peserta / Role</label>
+                <select
+                  value={editTarget}
+                  onChange={(e) => setEditTarget(e.target.value)}
+                  className="input-field bg-[var(--bg-primary)] font-medium text-xs"
+                >
+                  <optgroup label="Tingkat Pimpinan & BPH">
+                    <option value="TRIMITRA">👑 TRIMITRA (Ketua OSIS, Wakil 1 & 2)</option>
+                    <option value="BPH">🏛️ BPH (Trimitra, Sekretaris, Bendahara)</option>
+                  </optgroup>
+                  <optgroup label="Tingkat Organisasi">
+                    <option value="SEMUA_SEKBID">🌐 SEMUA SEKBID (Seluruh Pengurus 1-10 & Anggota)</option>
+                  </optgroup>
+                  <optgroup label="Seksi Bidang 1 s.d 10">
+                    {TARGET_ROLE_OPTIONS.filter((t) => t.group === "Seksi Bidang 1 s.d 10").map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Lokasi</label>
-                <input type="text" value={editLokasi} onChange={(e) => setEditLokasi(e.target.value)} className="input-field" required />
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Judul Rapat</label>
+                <input
+                  type="text"
+                  value={editJudul}
+                  onChange={(e) => setEditJudul(e.target.value)}
+                  className="input-field text-sm"
+                  required
+                />
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Agenda Pembahasan</label>
-                <textarea rows={2} value={editAgenda} onChange={(e) => setEditAgenda(e.target.value)} className="input-field resize-none" required></textarea>
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Lokasi</label>
+                <input
+                  type="text"
+                  value={editLokasi}
+                  onChange={(e) => setEditLokasi(e.target.value)}
+                  className="input-field text-sm"
+                  required
+                />
               </div>
+
               <div>
-                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Tanggal & Waktu</label>
-                <input type="datetime-local" value={editTanggal} onChange={(e) => setEditTanggal(e.target.value)} className="input-field text-sm font-mono" required />
+                <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Agenda Pembahasan</label>
+                <textarea
+                  rows={2}
+                  value={editAgenda}
+                  onChange={(e) => setEditAgenda(e.target.value)}
+                  className="input-field resize-none text-sm"
+                  required
+                ></textarea>
               </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border)]">
-                <button type="button" onClick={() => setEditingMeeting(null)} className="btn-secondary text-xs">
-                  Batal
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Tanggal & Waktu</label>
+                  <input
+                    type="datetime-local"
+                    value={editTanggal}
+                    onChange={(e) => setEditTanggal(e.target.value)}
+                    className="input-field text-xs font-mono"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Status Rapat</label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value)}
+                    className="input-field bg-[var(--bg-primary)] text-xs"
+                  >
+                    <option value="Terjadwal">Terjadwal</option>
+                    <option value="Berlangsung">Berlangsung</option>
+                    <option value="Selesai">Selesai</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-[var(--border)]">
+                <button
+                  type="button"
+                  onClick={() => handleDeleteMeeting(editingMeeting.rapat_id, editingMeeting.judul)}
+                  className="px-3 py-1.5 rounded-lg border border-red-500/40 text-red-400 hover:bg-red-500/10 text-xs font-semibold transition-all"
+                >
+                  Hapus Rapat
                 </button>
-                <button type="submit" disabled={savingEdit} className="btn-primary text-xs">
-                  {savingEdit ? "Menyimpan..." : "Simpan Perubahan"}
-                </button>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setEditingMeeting(null)} className="btn-secondary text-xs">
+                    Batal
+                  </button>
+                  <button type="submit" disabled={savingEdit} className="btn-primary text-xs">
+                    {savingEdit ? "Menyimpan..." : "Simpan & Siarkan"}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
