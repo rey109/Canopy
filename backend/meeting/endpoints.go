@@ -334,6 +334,35 @@ type ListPresensiResponse struct {
 	Presensi []PresensiDetail `json:"presensi"`
 }
 
+// LookupRapatByQR — cari rapat berdasarkan QR token (dipanggil setelah kamera scan)
+//encore:api auth path=/rapat/lookup-qr method=GET
+func LookupRapatByQR(ctx context.Context, params struct {
+	QRToken string `query:"qr_token"`
+}) (*RapatDetail, error) {
+	var r RapatDetail
+	var retDivID sql.NullInt32
+	var retQR sql.NullString
+	err := db.QueryRow(ctx, `
+		SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
+		       dibuat_oleh, status, qr_code, created_at
+		FROM rapat WHERE qr_code = $1
+	`, params.QRToken).Scan(
+		&r.RapatID, &r.PeriodeID, &retDivID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
+		&r.DibuatOleh, &r.Status, &retQR, &r.CreatedAt,
+	)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.NotFound, Message: "QR token tidak cocok dengan rapat manapun"}
+	}
+	if retDivID.Valid {
+		v := int(retDivID.Int32)
+		r.DivisionID = &v
+	}
+	if retQR.Valid {
+		r.QRCode = &retQR.String
+	}
+	return &r, nil
+}
+
 // ScanPresensi — endpoint utama saat user scan QR (masuk atau izin/sakit)
 //encore:api auth path=/presensi/scan method=POST
 func ScanPresensi(ctx context.Context, params *ScanQRParams) (*PresensiDetail, error) {
