@@ -4,8 +4,7 @@
 ALTER TABLE rapat
     ADD COLUMN IF NOT EXISTS proker_id INT DEFAULT NULL;
 
-ALTER TABLE rapat
-    DROP CONSTRAINT IF EXISTS chk_rapat_status;
+DROP CONSTRAINT IF EXISTS chk_rapat_status;
 
 ALTER TABLE rapat
     ADD CONSTRAINT chk_rapat_status
