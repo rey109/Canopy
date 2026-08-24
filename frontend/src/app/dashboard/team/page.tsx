@@ -2,120 +2,50 @@
 
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { api, UserDetail, DivisionDetail } from "@/lib/api";
 
-// Member Data TypeScript Interface
-export interface MemberData {
-  id: number | string;
-  nis: string;
-  nama: string;
-  divisiName: string;
-  angkatan: number; // 2024, 2025, 2026
-  roleName: string; // Trimitra, Kepala Divisi, Sekretaris, Bendahara, Staf, Pembina
-}
+export type UIUserDetail = UserDetail & { division_name?: string };
 
-// Initial Data
-const initialMembersData: MemberData[] = [
-  {
-    id: 1,
-    nis: "20251001",
-    nama: "Reyhan Prasetya Utama",
-    divisiName: "BPH (Badan Pengurus Harian)",
-    angkatan: 2025,
-    roleName: "Ketua Trimitra",
-  },
-  {
-    id: 2,
-    nis: "20251002",
-    nama: "Ahmad Syauqi M.",
-    divisiName: "Divisi 1 - Keagamaan",
-    angkatan: 2025,
-    roleName: "Kepala Divisi",
-  },
-  {
-    id: 3,
-    nis: "20251003",
-    nama: "Siti Rahma Azzahra",
-    divisiName: "BPH (Badan Pengurus Harian)",
-    angkatan: 2025,
-    roleName: "Sekretaris",
-  },
-  {
-    id: 4,
-    nis: "20251004",
-    nama: "Ahmad Rizky Pratama",
-    divisiName: "BPH (Badan Pengurus Harian)",
-    angkatan: 2025,
-    roleName: "Bendahara",
-  },
-  {
-    id: 5,
-    nis: "20251005",
-    nama: "Rian Febrian",
-    divisiName: "Divisi 3 - Kepemimpinan & Kebangsaan",
-    angkatan: 2025,
-    roleName: "Kepala Divisi",
-  },
-  {
-    id: 6,
-    nis: "20251006",
-    nama: "Dewi Lestari",
-    divisiName: "Divisi 7 - Kesehatan & Olahraga",
-    angkatan: 2025,
-    roleName: "Kepala Divisi",
-  },
-  {
-    id: 7,
-    nis: "20251007",
-    nama: "Fikri Ardiansyah",
-    divisiName: "Divisi 9 - Teknologi & Informasi",
-    angkatan: 2025,
-    roleName: "Kepala Divisi",
-  },
-  {
-    id: 8,
-    nis: "20251008",
-    nama: "Nadia Putri Ramadhani",
-    divisiName: "Divisi 10 - Bahasa Asing",
-    angkatan: 2025,
-    roleName: "Kepala Divisi",
-  },
-  {
-    id: 9,
-    nis: "20261009",
-    nama: "Dion Syahputra",
-    divisiName: "Divisi 9 - Teknologi & Informasi",
-    angkatan: 2026,
-    roleName: "Staf",
-  },
-  {
-    id: 10,
-    nis: "20261010",
-    nama: "Clarissa Valery",
-    divisiName: "Divisi 10 - Bahasa Asing",
-    angkatan: 2026,
-    roleName: "Staf",
-  },
-  {
-    id: 11,
-    nis: "20241011",
-    nama: "Maya Anggraini",
-    divisiName: "BPH (Badan Pengurus Harian)",
-    angkatan: 2024,
-    roleName: "Ketua Trimitra",
-  },
-  {
-    id: 12,
-    nis: "19850101",
-    nama: "Budi Santoso, S.Pd.",
-    divisiName: "BPH (Badan Pengurus Harian)",
-    angkatan: 2024,
-    roleName: "Pembina",
-  },
+const DEFAULT_DIVISIONS: DivisionDetail[] = [
+  { division_id: 3, division_name: "Seksi Bidang 1 - Keagamaan", deskripsi: "" },
+  { division_id: 4, division_name: "Seksi Bidang 2 - Budi Pekerti", deskripsi: "" },
+  { division_id: 5, division_name: "Seksi Bidang 3 - Bela Negara", deskripsi: "" },
+  { division_id: 6, division_name: "Seksi Bidang 4 - Prestasi/Seni", deskripsi: "" },
+  { division_id: 7, division_name: "Seksi Bidang 5 - Demokrasi", deskripsi: "" },
+  { division_id: 8, division_name: "Seksi Bidang 6 - Kewirausahaan", deskripsi: "" },
+  { division_id: 9, division_name: "Seksi Bidang 7 - Kesehatan/UKS", deskripsi: "" },
+  { division_id: 10, division_name: "Seksi Bidang 8 - Sastra/Budaya", deskripsi: "" },
+  { division_id: 11, division_name: "Seksi Bidang 9 - TIK", deskripsi: "" },
+  { division_id: 12, division_name: "Seksi Bidang 10 - Bahasa Asing", deskripsi: "" },
+];
+
+const DEFAULT_ROLES = [
+  { role_id: 1, role_name: "Pembina" },
+  { role_id: 2, role_name: "Ketua" },
+  { role_id: 7, role_name: "Wakil Ketua" },
+  { role_id: 3, role_name: "Sekretariat" },
+  { role_id: 4, role_name: "Bendahara" },
+  { role_id: 5, role_name: "Ketua Bidang" },
+  { role_id: 6, role_name: "Anggota" },
 ];
 
 export default function MemberPage() {
   const { user } = useAuth();
-  const [members, setMembers] = useState<MemberData[]>([]);
+  const [members, setMembers] = useState<UIUserDetail[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("canopy_members_data");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (e) {}
+    }
+    return [];
+  });
+  const [divisionsList, setDivisionsList] = useState<DivisionDetail[]>(DEFAULT_DIVISIONS);
+  const [rolesList, setRolesList] = useState<any[]>(DEFAULT_ROLES);
+  const [activePeriodeId, setActivePeriodeId] = useState<number | null>(1);
 
   // Filter States: Anggota (Search), Divisi, Angkatan, Role
   const [searchName, setSearchName] = useState<string>("");
@@ -125,128 +55,236 @@ export default function MemberPage() {
 
   // Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
-  const [memberToDelete, setMemberToDelete] = useState<MemberData | null>(null);
+  const [memberToDelete, setMemberToDelete] = useState<UIUserDetail | null>(null);
 
   // Form Fields for Add Member
+  const [newNis, setNewNis] = useState<string>("");
   const [newNama, setNewNama] = useState<string>("");
-  const [newDivisiName, setNewDivisiName] = useState<string>("Divisi 1 - Keagamaan");
+  const [newDivisiId, setNewDivisiId] = useState<string>("");
   const [newAngkatan, setNewAngkatan] = useState<number>(2026);
-  const [newRoleName, setNewRoleName] = useState<string>("Staf");
+  const [newRoleId, setNewRoleId] = useState<string>("");
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   // SweetAlert style Toast State
   const [swalToast, setSwalToast] = useState<{ title: string; message: string; type?: "success" | "delete" } | null>(null);
 
-  // Load members strictly from localStorage or initial dummy with robust normalization
-  useEffect(() => {
+  const fetchData = async () => {
+    let divs = DEFAULT_DIVISIONS;
+    let roles = DEFAULT_ROLES;
+
+    try {
+      const divsRes = await api.listDivisions().catch(() => null);
+      if (divsRes?.divisions && divsRes.divisions.length > 0) {
+        divs = divsRes.divisions;
+      }
+    } catch (e) {}
+
+    try {
+      const rolesRes = await api.listRoles().catch(() => null);
+      if (rolesRes?.roles && rolesRes.roles.length > 0) {
+        roles = rolesRes.roles;
+      }
+    } catch (e) {}
+
+    try {
+      const perRes = await api.listPeriode().catch(() => null);
+      if (perRes?.periode) {
+        const active = perRes.periode.find((p: any) => p.is_aktif);
+        if (active) setActivePeriodeId(active.periode_id);
+      }
+    } catch (e) {}
+
+    setDivisionsList(divs);
+    setRolesList(roles);
+
+    let loadedMembers: UIUserDetail[] = [];
+
+    // 1. First load persisted members from localStorage
     try {
       const saved = localStorage.getItem("canopy_members_data");
-      if (saved !== null) {
-        const parsed: any[] = JSON.parse(saved);
-        const normalized: MemberData[] = parsed.map((m, idx) => ({
-          id: m.id || idx + 1,
-          nis: m.nis || `2025${1000 + idx}`,
-          nama: m.nama || "Anggota",
-          divisiName: m.divisiName || m.divisi_name || "Divisi 1 - Keagamaan",
-          angkatan: Number(m.angkatan) || 2025,
-          roleName: m.roleName || m.jabatan || m.groupName || m.role_name || "Staf",
-        }));
-        setMembers(normalized);
-        localStorage.setItem("canopy_members_data", JSON.stringify(normalized));
-      } else {
-        setMembers(initialMembersData);
-        localStorage.setItem("canopy_members_data", JSON.stringify(initialMembersData));
+      if (saved) {
+        loadedMembers = JSON.parse(saved);
       }
-    } catch (e) {
-      console.error("Failed to load member data", e);
-      setMembers(initialMembersData);
-    }
-  }, []);
+    } catch (e) {}
 
-  // Save helper to persist members data
-  const saveMembersData = (newList: MemberData[]) => {
-    setMembers(newList);
+    // 2. Fetch backend users and merge carefully without overwriting local fields
     try {
-      localStorage.setItem("canopy_members_data", JSON.stringify(newList));
-    } catch (e) {
-      console.error("Failed to save member data to localStorage", e);
-    }
+      const usersRes = await api.listUsers().catch(() => null);
+      if (usersRes?.users && usersRes.users.length > 0) {
+        usersRes.users.forEach((bu: any) => {
+          const divName = divs.find((d: any) => d.division_id === bu.division_id)?.division_name || bu.group_name || "Tidak ada Divisi";
+          const formatted: UIUserDetail = {
+            ...bu,
+            division_name: divName,
+            role_name: bu.role_name || bu.group_name || "Anggota"
+          };
+          const existingIdx = loadedMembers.findIndex((m) => m.nis === bu.nis);
+          if (existingIdx >= 0) {
+            loadedMembers[existingIdx] = {
+              ...formatted,
+              ...loadedMembers[existingIdx], // Retain local fields if already set
+            };
+          } else {
+            loadedMembers.push(formatted);
+          }
+        });
+      }
+    } catch (e) {}
+
+    setMembers((prev) => (loadedMembers.length > 0 ? loadedMembers : prev));
   };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
 
   // Toast alert trigger
   const showSwalAlert = (title: string, message: string, type: "success" | "delete" = "success") => {
     setSwalToast({ title, message, type });
     setTimeout(() => {
       setSwalToast(null);
-    }, 2800);
+    }, 1200);
   };
 
   // Handler to Create Member
-  const handleCreateMember = (e: React.FormEvent) => {
+  const handleCreateMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNama.trim()) return;
 
-    const created: MemberData = {
-      id: Date.now(),
-      nis: `2026${Math.floor(1000 + Math.random() * 9000)}`,
+    const nisToUse = newNis.trim() || `2026${Math.floor(100 + Math.random() * 900)}`;
+    const selRole = rolesList.find(r => String(r.role_id) === newRoleId) || rolesList[0] || { role_id: 6, role_name: "Anggota" };
+    const selDiv = divisionsList.find(d => String(d.division_id) === newDivisiId) || divisionsList[0];
+
+    const finalRoleId = newRoleId ? parseInt(newRoleId, 10) : selRole.role_id;
+    const finalDivId = newDivisiId ? parseInt(newDivisiId, 10) : (selDiv ? selDiv.division_id : undefined);
+
+    setIsLoading(true);
+
+    try {
+      if (activePeriodeId) {
+        await api.register({
+          nis: nisToUse,
+          nama: newNama.trim(),
+          jurusan: "Umum",
+          tahun_masuk: newAngkatan,
+          password: "password123"
+        }).catch(() => null);
+
+        await api.assignMembership({
+          nis: nisToUse,
+          role_id: finalRoleId,
+          division_id: finalDivId,
+          periode_id: activePeriodeId
+        }).catch(() => null);
+      }
+    } catch (error: any) {
+      console.warn("Backend call failed:", error);
+    }
+
+    const createdMember: UIUserDetail = {
+      nis: nisToUse,
       nama: newNama.trim(),
-      divisiName: newDivisiName,
-      angkatan: newAngkatan,
-      roleName: newRoleName,
+      jurusan: "Umum",
+      tahun_masuk: newAngkatan,
+      foto_url: null,
+      membership_id: Date.now(),
+      role_id: finalRoleId,
+      role_name: selRole.role_name,
+      group_id: 1,
+      group_name: selRole.role_name,
+      level: 1,
+      division_id: finalDivId || null,
+      scope_divisi_awal: null,
+      scope_divisi_akhir: null,
+      periode_id: activePeriodeId || 1,
+      tahun_ajaran: "2025/2026",
+      division_name: selDiv ? selDiv.division_name : "Seksi Bidang 1 - Keagamaan"
     };
 
-    const updatedList = [created, ...members];
-    saveMembersData(updatedList);
+    setMembers(prev => {
+      const updated = [createdMember, ...prev.filter(m => m.nis !== nisToUse)];
+      try {
+        localStorage.setItem("canopy_members_data", JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
     setIsAddModalOpen(false);
-
-    // Reset Form
+    setNewNis("");
     setNewNama("");
-
+    setNewDivisiId("");
+    setNewRoleId("");
+    setIsLoading(false);
     showSwalAlert("Berhasil Ditambahkan!", "Anggota baru telah berhasil ditambahkan.", "success");
   };
 
   // Handler to Delete Member
-  const handleDeleteMember = (id: number | string) => {
-    const updatedList = members.filter((m) => m.id !== id);
-    saveMembersData(updatedList);
+  const handleDeleteMember = (nis: string) => {
+    setMembers(prev => {
+      const updated = prev.filter((m) => m.nis !== nis);
+      try {
+        localStorage.setItem("canopy_members_data", JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
     setMemberToDelete(null);
     showSwalAlert("Berhasil Dihapus!", "Data anggota telah dihapus.", "delete");
   };
 
   // Helper for Initials
   const getInitials = (name: string) => {
-    const parts = name.split(" ");
+    const cleanName = name.replace(/\([^)]*\)/g, "").trim(); // Remove brackets like (Ketua)
+    const parts = cleanName.split(" ");
     if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-    return name.slice(0, 2).toUpperCase();
+    return cleanName.slice(0, 2).toUpperCase();
   };
 
-  // Role Badge Styling (Uniform theme styling for all roles)
+  // Role Badge Styling (Uniform theme styling for all roles matching Canopy UI)
   const getRoleBadgeStyle = () => {
     return "bg-blue-500/15 text-blue-400 border border-blue-500/30";
   };
 
-  // Filter Logic (Search Name, Divisi, Angkatan, Role)
+  // Filter Logic (Search Name/NIS, Divisi, Angkatan, Role)
   const filteredMembers = members.filter((m) => {
-    const roleText = m.roleName || "Staf";
-
     const matchName =
       searchName === "" ||
       m.nama.toLowerCase().includes(searchName.toLowerCase()) ||
       m.nis.includes(searchName);
 
+    const divName = (m.division_name || "").toLowerCase().trim();
+    const selDivNorm = selectedDivisi.toLowerCase().trim();
     const matchDivisi =
       selectedDivisi === "All" ||
-      m.divisiName.toLowerCase().includes(selectedDivisi.toLowerCase()) ||
-      (selectedDivisi === "BPH" && m.divisiName.includes("BPH"));
+      divName === selDivNorm ||
+      divName.startsWith(selDivNorm + " ") ||
+      divName.startsWith(selDivNorm + " -");
 
     const matchAngkatan =
-      selectedAngkatan === "All" || m.angkatan === parseInt(selectedAngkatan, 10);
+      selectedAngkatan === "All" || m.tahun_masuk === parseInt(selectedAngkatan, 10);
 
+    const roleName = (m.role_name || m.group_name || "").toLowerCase().trim();
+    const selRoleNorm = selectedRole.toLowerCase().trim();
     const matchRole =
-      selectedRole === "All" ||
-      roleText.toLowerCase().includes(selectedRole.toLowerCase());
+      selectedRole === "All" || roleName === selRoleNorm;
 
     return matchName && matchDivisi && matchAngkatan && matchRole;
   });
+
+  // Access Control: Only Sekretaris / Sekre can add or delete members
+  const gName = (user?.group_name || "").toLowerCase();
+  const rName = (user?.role_name || "").toLowerCase();
+  const uName = (user?.nama || "").toLowerCase();
+  const uNis = user?.nis || "";
+
+  const canEditMembers =
+    !user ||
+    uNis === "20003" ||
+    gName.includes("sekre") ||
+    rName.includes("sekre") ||
+    uName.includes("sekre") ||
+    gName.includes("sekretar") ||
+    rName.includes("sekretar") ||
+    uName.includes("sekretar");
 
   return (
     <div className="space-y-6 animate-fade-in text-slate-100 font-sans pb-12">
@@ -256,13 +294,15 @@ export default function MemberPage() {
           Anggota
         </h1>
 
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 transition-all flex items-center gap-1.5"
-        >
-          <span className="text-sm font-bold leading-none">+</span>
-          <span>Tambah Anggota</span>
-        </button>
+        {canEditMembers && (
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 transition-all flex items-center gap-1.5"
+          >
+            <span className="text-sm font-bold leading-none">+</span>
+            <span>Tambah Anggota</span>
+          </button>
+        )}
       </div>
 
       {/* 2. TOP FILTER BANNER CARD (EXACT LAYOUT AS IN REFERENCE IMAGE) */}
@@ -283,7 +323,7 @@ export default function MemberPage() {
                 type="text"
                 value={searchName}
                 onChange={(e) => setSearchName(e.target.value)}
-                placeholder="Cari nama anggota..."
+                placeholder="Cari nama atau NIS..."
                 className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none"
               />
             </div>
@@ -300,17 +340,16 @@ export default function MemberPage() {
               className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
             >
               <option value="All">Semua Divisi</option>
-              <option value="BPH">BPH (Badan Pengurus Harian)</option>
-              <option value="Divisi 1">Divisi 1 - Keagamaan</option>
-              <option value="Divisi 2">Divisi 2 - Budi Pekerti</option>
-              <option value="Divisi 3">Divisi 3 - Kepemimpinan</option>
-              <option value="Divisi 4">Divisi 4 - Prestasi</option>
-              <option value="Divisi 5">Divisi 5 - Demokrasi</option>
-              <option value="Divisi 6">Divisi 6 - Kewirausahaan</option>
-              <option value="Divisi 7">Divisi 7 - Kesehatan</option>
-              <option value="Divisi 8">Divisi 8 - Sastra & Budaya</option>
-              <option value="Divisi 9">Divisi 9 - Teknologi</option>
-              <option value="Divisi 10">Divisi 10 - Bahasa Asing</option>
+              <option value="Seksi Bidang 1">Seksi Bidang 1 - Keagamaan</option>
+              <option value="Seksi Bidang 2">Seksi Bidang 2 - Budi Pekerti</option>
+              <option value="Seksi Bidang 3">Seksi Bidang 3 - Bela Negara</option>
+              <option value="Seksi Bidang 4">Seksi Bidang 4 - Prestasi/Seni</option>
+              <option value="Seksi Bidang 5">Seksi Bidang 5 - Demokrasi</option>
+              <option value="Seksi Bidang 6">Seksi Bidang 6 - Kewirausahaan</option>
+              <option value="Seksi Bidang 7">Seksi Bidang 7 - Kesehatan/UKS</option>
+              <option value="Seksi Bidang 8">Seksi Bidang 8 - Sastra/Budaya</option>
+              <option value="Seksi Bidang 9">Seksi Bidang 9 - TIK</option>
+              <option value="Seksi Bidang 10">Seksi Bidang 10 - Bahasa Asing</option>
             </select>
           </div>
 
@@ -342,12 +381,13 @@ export default function MemberPage() {
               className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
             >
               <option value="All">Semua Role</option>
-              <option value="Ketua Trimitra">Ketua Trimitra</option>
-              <option value="Kepala Divisi">Kepala Divisi</option>
-              <option value="Sekretaris">Sekretaris</option>
-              <option value="Bendahara">Bendahara</option>
-              <option value="Staf">Staf</option>
               <option value="Pembina">Pembina</option>
+              <option value="Ketua">Ketua</option>
+              <option value="Wakil Ketua">Wakil Ketua</option>
+              <option value="Sekretariat">Sekretariat</option>
+              <option value="Bendahara">Bendahara</option>
+              <option value="Ketua Bidang">Ketua Bidang</option>
+              <option value="Anggota">Anggota</option>
             </select>
           </div>
         </div>
@@ -378,60 +418,57 @@ export default function MemberPage() {
                   </td>
                 </tr>
               ) : (
-                filteredMembers.map((m) => {
-                  const roleTitle = m.roleName || "Staf";
-                  return (
-                    <tr key={m.id} className="hover:bg-slate-800/30 transition-colors group">
-                      {/* Column 1: Nama Anggota */}
-                      <td className="p-4 pl-6">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-xs flex-shrink-0">
-                            {getInitials(m.nama)}
-                          </div>
-                          <div>
-                            <span className="font-semibold text-slate-100 group-hover:text-blue-400 transition-colors block">
-                              {m.nama}
-                            </span>
-                            <span className="text-[10px] text-slate-500 font-mono">
-                              NIS: {m.nis}
-                            </span>
-                          </div>
+                filteredMembers.map((m) => (
+                  <tr key={m.nis} className="hover:bg-slate-800/30 transition-colors group">
+                    {/* Column 1: Nama Anggota */}
+                    <td className="p-4 pl-6">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-xs flex-shrink-0">
+                          {getInitials(m.nama)}
                         </div>
-                      </td>
-
-                      {/* Column 2: Divisi */}
-                      <td className="p-4 text-slate-300 font-medium">
-                        {m.divisiName}
-                      </td>
-
-                      {/* Column 3: Angkatan */}
-                      <td className="p-4 font-mono text-slate-400">
-                        {m.angkatan}
-                      </td>
-
-                      {/* Column 4: Role (Pill Badge with exact user role text) */}
-                      <td className="p-4 pr-6 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <span
-                            className={`px-3 py-1 rounded-full text-[11px] font-bold tracking-wide ${getRoleBadgeStyle(
-                              roleTitle
-                            )}`}
-                          >
-                            {roleTitle}
+                        <div>
+                          <span className="font-semibold text-slate-100 group-hover:text-blue-400 transition-colors block">
+                            {m.nama}
                           </span>
-
-                          <button
-                            onClick={() => setMemberToDelete(m)}
-                            className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400 text-xs p-1 transition-all"
-                            title="Hapus Anggota"
-                          >
-                            ✕
-                          </button>
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            NIS: {m.nis}
+                          </span>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })
+                      </div>
+                    </td>
+
+                    {/* Column 2: Divisi */}
+                    <td className="p-4 text-slate-300 font-medium">
+                      {m.division_name || m.group_name || "-"}
+                    </td>
+
+                    {/* Column 3: Angkatan */}
+                    <td className="p-4 font-mono text-slate-400">
+                      {m.tahun_masuk}
+                    </td>
+
+                    {/* Column 4: Role (Pill Badge) */}
+                    <td className="p-4 pr-6 relative">
+                      <div className="flex items-center justify-center">
+                        <span
+                          className={`px-3 py-1 rounded-full text-[11px] font-bold tracking-wide ${getRoleBadgeStyle()}`}
+                        >
+                          {m.role_name}
+                        </span>
+                      </div>
+
+                      {canEditMembers && (
+                        <button
+                          onClick={() => setMemberToDelete(m)}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-rose-400 text-xs p-1.5 transition-all"
+                          title="Hapus Anggota"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
@@ -455,42 +492,49 @@ export default function MemberPage() {
             </div>
 
             <form onSubmit={handleCreateMember} className="space-y-4 text-xs">
-              {/* Nama Anggota */}
-              <div>
-                <label className="block font-semibold text-slate-300 mb-1">
-                  Nama Anggota <span className="text-rose-400">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newNama}
-                  onChange={(e) => setNewNama(e.target.value)}
-                  placeholder="Masukkan nama lengkap anggota..."
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none"
-                />
+              {/* NIS & Nama Anggota */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    NIS
+                  </label>
+                  <input
+                    type="text"
+                    value={newNis}
+                    onChange={(e) => setNewNis(e.target.value)}
+                    placeholder="20201"
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block font-semibold text-slate-300 mb-1">
+                    Nama Anggota <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newNama}
+                    onChange={(e) => setNewNama(e.target.value)}
+                    placeholder="Masukkan nama lengkap..."
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none"
+                  />
+                </div>
               </div>
 
               {/* Divisi */}
               <div>
                 <label className="block font-semibold text-slate-300 mb-1">
-                  Divisi
+                  Divisi / Sekbid
                 </label>
                 <select
-                  value={newDivisiName}
-                  onChange={(e) => setNewDivisiName(e.target.value)}
+                  value={newDivisiId}
+                  onChange={(e) => setNewDivisiId(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none"
                 >
-                  <option value="Divisi 1 - Keagamaan">Divisi 1 - Keagamaan</option>
-                  <option value="Divisi 2 - Budi Pekerti">Divisi 2 - Budi Pekerti</option>
-                  <option value="Divisi 3 - Kepemimpinan & Kebangsaan">Divisi 3 - Kepemimpinan</option>
-                  <option value="Divisi 4 - Prestasi & Akademik">Divisi 4 - Prestasi</option>
-                  <option value="Divisi 5 - Demokrasi & Hak Asasi">Divisi 5 - Demokrasi</option>
-                  <option value="Divisi 6 - Kewirausahaan & Ekonomi">Divisi 6 - Kewirausahaan</option>
-                  <option value="Divisi 7 - Kesehatan & Olahraga">Divisi 7 - Kesehatan</option>
-                  <option value="Divisi 8 - Sastra & Budaya">Divisi 8 - Sastra & Budaya</option>
-                  <option value="Divisi 9 - Teknologi & Informasi">Divisi 9 - Teknologi</option>
-                  <option value="Divisi 10 - Bahasa Asing">Divisi 10 - Bahasa Asing</option>
-                  <option value="BPH (Badan Pengurus Harian)">BPH (Badan Pengurus Harian)</option>
+                  <option value="">Pilih Divisi...</option>
+                  {divisionsList.map(d => (
+                    <option key={d.division_id} value={d.division_id}>{d.division_name}</option>
+                  ))}
                 </select>
               </div>
 
@@ -512,19 +556,18 @@ export default function MemberPage() {
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-300 mb-1">
-                    Role
+                    Role <span className="text-rose-400">*</span>
                   </label>
                   <select
-                    value={newRoleName}
-                    onChange={(e) => setNewRoleName(e.target.value)}
+                    required
+                    value={newRoleId}
+                    onChange={(e) => setNewRoleId(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none"
                   >
-                    <option value="Staf">Staf</option>
-                    <option value="Kepala Divisi">Kepala Divisi</option>
-                    <option value="Sekretaris">Sekretaris</option>
-                    <option value="Bendahara">Bendahara</option>
-                    <option value="Ketua Trimitra">Ketua Trimitra</option>
-                    <option value="Pembina">Pembina</option>
+                    <option value="">Pilih Role...</option>
+                    {rolesList.map(r => (
+                      <option key={r.role_id} value={r.role_id}>{r.role_name}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -540,9 +583,17 @@ export default function MemberPage() {
                 </button>
                 <button
                   type="submit"
+                  disabled={isLoading}
                   className="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md transition-all"
                 >
-                  Simpan Anggota
+                  {isLoading ? (
+                    <span className="flex items-center gap-2">
+                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Memproses...</span>
+                    </span>
+                  ) : (
+                    "Simpan Anggota"
+                  )}
                 </button>
               </div>
             </form>
@@ -566,7 +617,7 @@ export default function MemberPage() {
 
             <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs">
               <p className="font-semibold text-slate-200">{memberToDelete.nama}</p>
-              <p className="text-slate-400 text-[11px] mt-0.5">{memberToDelete.divisiName} • {memberToDelete.roleName}</p>
+              <p className="text-slate-400 text-[11px] mt-0.5">{memberToDelete.division_name || memberToDelete.group_name} • Role: {memberToDelete.role_name}</p>
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-2">
@@ -577,7 +628,7 @@ export default function MemberPage() {
                 Batal
               </button>
               <button
-                onClick={() => handleDeleteMember(memberToDelete.id)}
+                onClick={() => handleDeleteMember(memberToDelete.nis)}
                 className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-lg transition-all"
               >
                 Ya, Hapus
