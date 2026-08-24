@@ -198,6 +198,15 @@ export interface NotulensiAttachment {
   type: string;
 }
 
+// Ubah URL relatif dari backend menjadi URL absolut yang bisa dipakai <img>/<a>
+export function fileUrl(url: string): string {
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:") || url.startsWith("blob:")) {
+    return url;
+  }
+  return `${API_BASE}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
 export interface NotulensiDetail {
   notulensi_id: number;
   rapat_id: number;
@@ -222,8 +231,11 @@ export interface NotulensiDetail {
 export interface NotulensiListItem extends NotulensiDetail {
   judul_rapat: string;
   tanggal_rapat: string;
+  lokasi_rapat?: string;
+  status_rapat?: string;
   division_id: number | null;
-  proker_id: number | null;
+  proker_id?: number | null;
+  dibuat_oleh?: string;
 }
 
 export interface DokumentasiDetail {
@@ -888,6 +900,9 @@ export const api = {
 
   getNotulensi: (id: number) =>
     request<NotulensiDetail>(`/rapat/${id}/notulensi`),
+
+  listNotulensi: () =>
+    request<{ notulensi: NotulensiListItem[] }>("/notulensi"),
 
   scanPresensi: (data: {
     qr_token: string;
