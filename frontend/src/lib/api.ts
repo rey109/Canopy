@@ -16,17 +16,24 @@ async function request<T>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-  });
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+    });
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.message || `Request failed: ${res.status}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || `Request failed: ${res.status}`);
+    }
+
+    return await res.json();
+  } catch (err: any) {
+    if (err.name === "TypeError" || err.message === "Failed to fetch") {
+      throw new Error("Gagal terhubung ke server. Periksa koneksi internet atau server backend.");
+    }
+    throw err;
   }
-
-  return res.json();
 }
 
 // ===== AUTH =====

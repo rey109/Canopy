@@ -185,13 +185,22 @@ export default function Sidebar() {
   useEffect(() => {
     if (!user) return;
 
+    // Default fallback items jika API getNavModules gagal / offline
+    const defaultItems: RenderItem[] = [
+      { label: "Dashboard", href: "/dashboard", icon: iconMap["Dashboard"] },
+      { label: "Task", href: "/dashboard/task", icon: iconMap["Task"] },
+      { label: "Program Kerja", href: "/dashboard/proker", icon: iconMap["Program Kerja"] },
+      { label: "Rapat", href: "/dashboard/meetings", icon: iconMap["Rapat"] },
+      { label: "Anggota", href: "/dashboard/team", icon: iconMap["Anggota"] },
+    ];
+
     // Ambil modul navigasi dinamis dari backend
     api.getNavModules()
       .then((res) => {
         const items: RenderItem[] = [];
 
         // 1. Tambah core modules
-        res.core_modules.forEach((m) => {
+        (res?.core_modules || []).forEach((m) => {
           items.push({
             label: m.module_name,
             href: hrefMap[m.module_name] || "/dashboard",
@@ -200,7 +209,7 @@ export default function Sidebar() {
         });
 
         // 2. Tambah role modules (dengan tanda isSpecial untuk style aksen per spec 06)
-        res.role_modules.forEach((m) => {
+        (res?.role_modules || []).forEach((m) => {
           items.push({
             label: m.module_name,
             href: hrefMap[m.module_name] || "/dashboard",
@@ -210,7 +219,7 @@ export default function Sidebar() {
         });
 
         // 3. Tambah divisi modules
-        res.divisi_modules.forEach((m) => {
+        (res?.divisi_modules || []).forEach((m) => {
           items.push({
             label: m.module_name,
             href: hrefMap[m.module_name] || "/dashboard",
@@ -218,10 +227,15 @@ export default function Sidebar() {
           });
         });
 
-        setNavItems(items);
+        if (items.length > 0) {
+          setNavItems(items);
+        } else {
+          setNavItems(defaultItems);
+        }
       })
       .catch((err) => {
-        console.error("Gagal load navigasi dinamis:", err);
+        console.warn("Gagal load navigasi dinamis, menggunakan fallback:", err?.message || err);
+        setNavItems(defaultItems);
       });
   }, [user]);
 
@@ -251,7 +265,7 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-        {navItems.map((item) => {
+        {navItems.map((item, idx) => {
           const isActive =
             pathname === item.href ||
             (item.href !== "/dashboard" && pathname.startsWith(item.href));
@@ -263,7 +277,7 @@ export default function Sidebar() {
 
           return (
             <Link
-              key={item.href}
+              key={`${item.label}-${item.href}-${idx}`}
               href={item.href}
               className={itemClass}
             >
@@ -273,35 +287,44 @@ export default function Sidebar() {
           );
         })}
 
-        {/* Separator */}
-        <div className="my-3 px-3">
-          <div className="border-t border-[var(--border)]"></div>
-        </div>
+        {/* Modul Manajemen Section (hanya tampilkan modul yang belum ada di navigasi utama) */}
+        {(() => {
+          const navHrefs = new Set(navItems.map((item) => item.href));
+          const filteredModulManajemen = modulManajemen.filter((mod) => {
+            const href = hrefMap[mod.key] || "/dashboard";
+            return !navHrefs.has(href);
+          });
 
-        {/* Modul Manajemen Section */}
-        <div className="px-3 mb-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">Modul Manajemen</p>
-        </div>
-        {modulManajemen.map((mod) => {
-          const href = hrefMap[mod.key] || "/dashboard";
-          const icon = iconMap[mod.key] || iconMap["Home"];
-          const isActive =
-            pathname === href ||
-            (href !== "/dashboard" && pathname.startsWith(href));
-
-          // Modul Anggota visible to all users
+          if (filteredModulManajemen.length === 0) return null;
 
           return (
-            <Link
-              key={mod.key}
-              href={href}
-              className={`sidebar-link ${isActive ? "active" : ""}`}
-            >
-              {icon}
-              {mod.label}
-            </Link>
+            <>
+              {/* Separator */}
+              <div className="my-3 px-3">
+                <div className="border-t border-[var(--border)]"></div>
+              </div>
+
+              {filteredModulManajemen.map((mod) => {
+                const href = hrefMap[mod.key] || "/dashboard";
+                const icon = iconMap[mod.key] || iconMap["Home"];
+                const isActive =
+                  pathname === href ||
+                  (href !== "/dashboard" && pathname.startsWith(href));
+
+                return (
+                  <Link
+                    key={mod.key}
+                    href={href}
+                    className={`sidebar-link ${isActive ? "active" : ""}`}
+                  >
+                    {icon}
+                    {mod.label}
+                  </Link>
+                );
+              })}
+            </>
           );
-        })}
+        })()}
       </nav>
 
       {/* User info */}

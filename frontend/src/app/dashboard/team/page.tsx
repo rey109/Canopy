@@ -68,6 +68,14 @@ export default function MemberPage() {
   // SweetAlert style Toast State
   const [swalToast, setSwalToast] = useState<{ title: string; message: string; type?: "success" | "delete" } | null>(null);
 
+  // Access Control: ONLY Sekretariat can add or delete members
+  const gName = (user?.group_name || "").toLowerCase();
+  const rName = (user?.role_name || "").toLowerCase();
+
+  const canEditMembers =
+    gName.includes("sekretar") ||
+    rName.includes("sekretar");
+
   const fetchData = async () => {
     let divs = DEFAULT_DIVISIONS;
     let roles = DEFAULT_ROLES;
@@ -98,47 +106,44 @@ export default function MemberPage() {
     setRolesList(roles);
 
     let loadedMembers: UIUserDetail[] = [];
-
-    // 1. First load persisted members from localStorage
-    try {
-      const saved = localStorage.getItem("canopy_members_data");
-      if (saved) {
-        loadedMembers = JSON.parse(saved);
-      }
-    } catch (e) {}
-
-    // 2. Fetch backend users and merge carefully without overwriting local fields
     try {
       const usersRes = await api.listUsers().catch(() => null);
       if (usersRes?.users && usersRes.users.length > 0) {
-        usersRes.users.forEach((bu: any) => {
-          const divName = divs.find((d: any) => d.division_id === bu.division_id)?.division_name || bu.group_name || "Tidak ada Divisi";
-          const formatted: UIUserDetail = {
-            ...bu,
-            division_name: divName,
-            role_name: bu.role_name || bu.group_name || "Anggota"
+        loadedMembers = usersRes.users.map((u) => {
+          const matchedDiv = divs.find((d) => d.division_id === u.division_id);
+          return {
+            ...u,
+            division_name: matchedDiv?.division_name || u.group_name || "Sekretariat Utama",
           };
-          const existingIdx = loadedMembers.findIndex((m) => m.nis === bu.nis);
-          if (existingIdx >= 0) {
-            loadedMembers[existingIdx] = {
-              ...formatted,
-              ...loadedMembers[existingIdx], // Retain local fields if already set
-            };
-          } else {
-            loadedMembers.push(formatted);
-          }
         });
       }
     } catch (e) {}
 
-    setMembers((prev) => (loadedMembers.length > 0 ? loadedMembers : prev));
+    if (loadedMembers.length === 0) {
+      if (typeof window !== "undefined") {
+        try {
+          const saved = localStorage.getItem("canopy_members_data");
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setMembers(parsed);
+              return;
+            }
+          }
+        } catch (e) {}
+      }
+    } else {
+      setMembers(loadedMembers);
+      try {
+        localStorage.setItem("canopy_members_data", JSON.stringify(loadedMembers));
+      } catch (e) {}
+    }
   };
 
   useEffect(() => {
     fetchData();
   }, []);
 
-  // Toast alert trigger
   const showSwalAlert = (title: string, message: string, type: "success" | "delete" = "success") => {
     setSwalToast({ title, message, type });
     setTimeout(() => {
@@ -147,53 +152,33 @@ export default function MemberPage() {
   };
 
   // Handler to Create Member
-  const handleCreateMember = async (e: React.FormEvent) => {
+  const handleCreateMember = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEditMembers) {
+      alert("Hanya Sekretariat yang memiliki akses untuk menambahkan anggota baru.");
+      return;
+    }
     if (!newNama.trim()) return;
-
-    const nisToUse = newNis.trim() || `2026${Math.floor(100 + Math.random() * 900)}`;
-    const selRole = rolesList.find(r => String(r.role_id) === newRoleId) || rolesList[0] || { role_id: 6, role_name: "Anggota" };
-    const selDiv = divisionsList.find(d => String(d.division_id) === newDivisiId) || divisionsList[0];
-
-    const finalRoleId = newRoleId ? parseInt(newRoleId, 10) : selRole.role_id;
-    const finalDivId = newDivisiId ? parseInt(newDivisiId, 10) : (selDiv ? selDiv.division_id : undefined);
 
     setIsLoading(true);
 
-    try {
-      if (activePeriodeId) {
-        await api.register({
-          nis: nisToUse,
-          nama: newNama.trim(),
-          jurusan: "Umum",
-          tahun_masuk: newAngkatan,
-          password: "password123"
-        }).catch(() => null);
-
-        await api.assignMembership({
-          nis: nisToUse,
-          role_id: finalRoleId,
-          division_id: finalDivId,
-          periode_id: activePeriodeId
-        }).catch(() => null);
-      }
-    } catch (error: any) {
-      console.warn("Backend call failed:", error);
-    }
+    const nisToUse = newNis.trim() || `20${Math.floor(1000 + Math.random() * 9000)}`;
+    const selDiv = divisionsList.find((d) => String(d.division_id) === newDivisiId);
+    const selRole = rolesList.find((r) => String(r.role_id) === newRoleId) || rolesList[0] || { role_id: 6, role_name: "Anggota" };
 
     const createdMember: UIUserDetail = {
       nis: nisToUse,
       nama: newNama.trim(),
-      jurusan: "Umum",
-      tahun_masuk: newAngkatan,
+      jurusan: "PPLG",
+      tahun_masuk: newAngkatan || 2026,
       foto_url: null,
       membership_id: Date.now(),
-      role_id: finalRoleId,
+      role_id: selRole.role_id,
       role_name: selRole.role_name,
       group_id: 1,
-      group_name: selRole.role_name,
+      group_name: selDiv ? selDiv.division_name : "Sekretariat",
       level: 1,
-      division_id: finalDivId || null,
+      division_id: selDiv ? selDiv.division_id : 3,
       scope_divisi_awal: null,
       scope_divisi_akhir: null,
       periode_id: activePeriodeId || 1,
@@ -201,8 +186,8 @@ export default function MemberPage() {
       division_name: selDiv ? selDiv.division_name : "Seksi Bidang 1 - Keagamaan"
     };
 
-    setMembers(prev => {
-      const updated = [createdMember, ...prev.filter(m => m.nis !== nisToUse)];
+    setMembers((prev) => {
+      const updated = [createdMember, ...prev.filter((m) => m.nis !== nisToUse)];
       try {
         localStorage.setItem("canopy_members_data", JSON.stringify(updated));
       } catch (e) {}
@@ -220,7 +205,11 @@ export default function MemberPage() {
 
   // Handler to Delete Member
   const handleDeleteMember = (nis: string) => {
-    setMembers(prev => {
+    if (!canEditMembers) {
+      alert("Hanya Sekretariat yang memiliki akses untuk menghapus anggota.");
+      return;
+    }
+    setMembers((prev) => {
       const updated = prev.filter((m) => m.nis !== nis);
       try {
         localStorage.setItem("canopy_members_data", JSON.stringify(updated));
@@ -233,18 +222,18 @@ export default function MemberPage() {
 
   // Helper for Initials
   const getInitials = (name: string) => {
-    const cleanName = name.replace(/\([^)]*\)/g, "").trim(); // Remove brackets like (Ketua)
+    const cleanName = name.replace(/\([^)]*\)/g, "").trim();
     const parts = cleanName.split(" ");
     if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
     return cleanName.slice(0, 2).toUpperCase();
   };
 
-  // Role Badge Styling (Uniform theme styling for all roles matching Canopy UI)
+  // Role Badge Styling
   const getRoleBadgeStyle = () => {
     return "bg-blue-500/15 text-blue-400 border border-blue-500/30";
   };
 
-  // Filter & Sort Logic (Search Name/NIS, Divisi, Angkatan, Role + Sort A-Z by Nama)
+  // Filter & Sort Logic
   const filteredMembers = members
     .filter((m) => {
       const matchName =
@@ -272,22 +261,9 @@ export default function MemberPage() {
     })
     .sort((a, b) => a.nama.localeCompare(b.nama, "id", { sensitivity: "base" }));
 
-  // Access Control: Only Sekretaris / Sekre can add or delete members
-  const gName = (user?.group_name || "").toLowerCase();
-  const rName = (user?.role_name || "").toLowerCase();
-  const uName = (user?.nama || "").toLowerCase();
-  const uNis = user?.nis || "";
-
-  const canEditMembers =
-    gName === "sekretaris" ||
-    rName === "sekretaris" ||
-    gName === "trimitra" ||
-    rName === "ketua" ||
-    uNis === "20003";
-
   return (
     <div className="space-y-6 animate-fade-in text-slate-100 font-sans pb-12">
-      {/* 1. TOP HEADER BAR: TITLE & CREATE NEW BUTTON */}
+      {/* 1. TOP HEADER BAR: TITLE & CREATE NEW BUTTON (ONLY VISIBLE TO SEKRETARIAT) */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-slate-50 tracking-tight">
           Anggota
@@ -296,7 +272,7 @@ export default function MemberPage() {
         {canEditMembers && (
           <button
             onClick={() => setIsAddModalOpen(true)}
-            className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 transition-all flex items-center gap-1.5"
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 transition-all flex items-center gap-1.5 cursor-pointer"
           >
             <span className="text-sm font-bold leading-none">+</span>
             <span>Tambah Anggota</span>
@@ -304,13 +280,13 @@ export default function MemberPage() {
         )}
       </div>
 
-      {/* 2. TOP FILTER BANNER CARD (EXACT LAYOUT AS IN REFERENCE IMAGE) */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+      {/* 2. TOP FILTER BANNER CARD */}
+      <div className="bg-[#1e293b]/90 border border-slate-700/60 rounded-3xl p-6 shadow-xl space-y-4">
         <h2 className="text-sm font-bold text-rose-400/90">
           Filter Anggota
         </h2>
 
-        {/* 4 FILTERS HORIZONTAL GRID: Anggota (Search), Divisi, Angkatan, Role */}
+        {/* 4 FILTERS HORIZONTAL GRID */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* FILTER 1: Anggota (Search Box) */}
           <div className="space-y-1">
@@ -323,7 +299,7 @@ export default function MemberPage() {
                 value={searchName}
                 onChange={(e) => setSearchName(e.target.value)}
                 placeholder="Cari nama atau NIS..."
-                className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none"
+                className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none"
               />
             </div>
           </div>
@@ -336,7 +312,7 @@ export default function MemberPage() {
             <select
               value={selectedDivisi}
               onChange={(e) => setSelectedDivisi(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
+              className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
             >
               <option value="All">Semua Divisi</option>
               <option value="Seksi Bidang 1">Seksi Bidang 1 - Keagamaan</option>
@@ -360,7 +336,7 @@ export default function MemberPage() {
             <select
               value={selectedAngkatan}
               onChange={(e) => setSelectedAngkatan(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
+              className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
             >
               <option value="All">Semua Angkatan</option>
               <option value="2026">2026</option>
@@ -377,7 +353,7 @@ export default function MemberPage() {
             <select
               value={selectedRole}
               onChange={(e) => setSelectedRole(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
+              className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
             >
               <option value="All">Semua Role</option>
               <option value="Pembina">Pembina</option>
@@ -391,14 +367,13 @@ export default function MemberPage() {
           </div>
         </div>
 
-        {/* Footnote Helper Text */}
         <p className="text-[11px] text-slate-500 italic pt-1">
           *Data telah ditampilkan sesuai dengan filter yang Anda pilih
         </p>
       </div>
 
-      {/* 3. MAIN TABLE DATA LIST (EXACT COLUMNS: Nama Anggota, Divisi, Angkatan, Role) */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+      {/* 3. MAIN TABLE DATA LIST */}
+      <div className="bg-[#1e293b]/90 border border-slate-700/60 rounded-3xl overflow-hidden shadow-xl">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
@@ -456,10 +431,11 @@ export default function MemberPage() {
                         </span>
                       </div>
 
+                      {/* ONLY SHOW DELETE BUTTON FOR SEKRETARIAT */}
                       {canEditMembers && (
                         <button
                           onClick={() => setMemberToDelete(m)}
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-rose-400 text-xs p-1.5 transition-all"
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-rose-400 text-xs p-1.5 transition-all cursor-pointer"
                           title="Hapus Anggota"
                         >
                           ✕
@@ -474,8 +450,8 @@ export default function MemberPage() {
         </div>
       </div>
 
-      {/* 4. FORM MODAL: TAMBAH ANGGOTA BARU */}
-      {isAddModalOpen && (
+      {/* 4. FORM MODAL: TAMBAH ANGGOTA BARU (SEKRETARIAT ONLY) */}
+      {canEditMembers && isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-modal-backdrop overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 my-8 animate-modal-pop">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -484,29 +460,28 @@ export default function MemberPage() {
               </h3>
               <button
                 onClick={() => setIsAddModalOpen(false)}
-                className="text-slate-400 hover:text-slate-200 text-xl font-bold leading-none"
+                className="text-slate-400 hover:text-slate-200 text-lg font-bold cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            <form onSubmit={handleCreateMember} className="space-y-4 text-xs">
-              {/* NIS & Nama Anggota */}
-              <div className="grid grid-cols-3 gap-3">
+            <form onSubmit={handleCreateMember} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-300 mb-1">
-                    NIS
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    NIS <span className="text-slate-500">(Opsional)</span>
                   </label>
                   <input
                     type="text"
                     value={newNis}
                     onChange={(e) => setNewNis(e.target.value)}
-                    placeholder="20201"
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none"
+                    placeholder="Auto 20xxxx"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
                   />
                 </div>
-                <div className="col-span-2">
-                  <label className="block font-semibold text-slate-300 mb-1">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Nama Anggota <span className="text-rose-400">*</span>
                   </label>
                   <input
@@ -514,39 +489,40 @@ export default function MemberPage() {
                     required
                     value={newNama}
                     onChange={(e) => setNewNama(e.target.value)}
-                    placeholder="Masukkan nama lengkap..."
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none"
+                    placeholder="Masukkan nama..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500"
                   />
                 </div>
               </div>
 
-              {/* Divisi */}
               <div>
-                <label className="block font-semibold text-slate-300 mb-1">
-                  Divisi / Sekbid
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Divisi / Sekbid <span className="text-rose-400">*</span>
                 </label>
                 <select
+                  required
                   value={newDivisiId}
                   onChange={(e) => setNewDivisiId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
                 >
-                  <option value="">Pilih Divisi...</option>
-                  {divisionsList.map(d => (
-                    <option key={d.division_id} value={d.division_id}>{d.division_name}</option>
+                  <option value="">Pilih Divisi / Sekbid...</option>
+                  {divisionsList.map((d) => (
+                    <option key={d.division_id} value={d.division_id}>
+                      {d.division_name}
+                    </option>
                   ))}
                 </select>
               </div>
 
-              {/* Angkatan & Role */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-300 mb-1">
-                    Angkatan
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Angkatan <span className="text-rose-400">*</span>
                   </label>
                   <select
                     value={newAngkatan}
-                    onChange={(e) => setNewAngkatan(parseInt(e.target.value, 10))}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none"
+                    onChange={(e) => setNewAngkatan(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
                   >
                     <option value={2026}>2026</option>
                     <option value={2025}>2025</option>
@@ -554,45 +530,39 @@ export default function MemberPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-300 mb-1">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Role <span className="text-rose-400">*</span>
                   </label>
                   <select
                     required
                     value={newRoleId}
                     onChange={(e) => setNewRoleId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl p-2.5 text-xs text-slate-100 focus:outline-none"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
                   >
                     <option value="">Pilih Role...</option>
-                    {rolesList.map(r => (
-                      <option key={r.role_id} value={r.role_id}>{r.role_name}</option>
+                    {rolesList.map((r) => (
+                      <option key={r.role_id} value={r.role_id}>
+                        {r.role_name}
+                      </option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              {/* Modal Actions */}
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md transition-all"
+                  className="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 transition-all cursor-pointer"
                 >
-                  {isLoading ? (
-                    <span className="flex items-center gap-2">
-                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>Memproses...</span>
-                    </span>
-                  ) : (
-                    "Simpan Anggota"
-                  )}
+                  {isLoading ? "Menyimpan..." : "Simpan Anggota"}
                 </button>
               </div>
             </form>
@@ -600,35 +570,31 @@ export default function MemberPage() {
         </div>
       )}
 
-      {/* 5. CONFIRMATION MODAL: HAPUS ANGGOTA */}
-      {memberToDelete && (
+      {/* 5. CONFIRMATION MODAL: HAPUS ANGGOTA (SEKRETARIAT ONLY) */}
+      {canEditMembers && memberToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-modal-backdrop">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-modal-pop">
-            <div className="flex items-center gap-3 text-rose-400">
-              <div className="w-10 h-10 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center flex-shrink-0">
-                ⚠️
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-100">Hapus Anggota Ini?</h3>
-                <p className="text-xs text-slate-400">Tindakan ini tidak dapat dibatalkan.</p>
-              </div>
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-4 text-center animate-modal-pop">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
             </div>
-
-            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs">
-              <p className="font-semibold text-slate-200">{memberToDelete.nama}</p>
-              <p className="text-slate-400 text-[11px] mt-0.5">{memberToDelete.division_name || memberToDelete.group_name} • Role: {memberToDelete.role_name}</p>
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-slate-100">Hapus Anggota Ini?</h3>
+              <p className="text-xs text-slate-400 font-medium">
+                Apakah Anda yakin ingin menghapus &quot;<span className="font-bold text-slate-200">{memberToDelete.nama}</span>&quot; dari daftar anggota?
+              </p>
             </div>
-
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="flex items-center justify-center gap-3 pt-2">
               <button
                 onClick={() => setMemberToDelete(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition-all cursor-pointer"
               >
                 Batal
               </button>
               <button
                 onClick={() => handleDeleteMember(memberToDelete.nis)}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-lg transition-all"
+                className="px-5 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/20 transition-all cursor-pointer"
               >
                 Ya, Hapus
               </button>
@@ -637,25 +603,20 @@ export default function MemberPage() {
         </div>
       )}
 
-      {/* SWEETALERT STYLE POPUP ALERT */}
+      {/* 6. SWEETALERT TOAST NOTIFICATION */}
       {swalToast && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-modal-backdrop pointer-events-none">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center max-w-sm w-full space-y-3 animate-swal-pop pointer-events-auto">
-            {swalToast.type === "delete" ? (
-              <div className="w-16 h-16 rounded-full bg-rose-500/15 border-2 border-rose-500/40 flex items-center justify-center text-rose-400 animate-swal-icon shadow-lg shadow-rose-500/20">
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/40 pointer-events-none animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl flex flex-col items-center text-center max-w-xs w-full space-y-2 pointer-events-auto">
+            {swalToast.type === "success" ? (
+              <div className="w-12 h-12 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-bold">
+                ✓
               </div>
             ) : (
-              <div className="w-16 h-16 rounded-full bg-emerald-500/15 border-2 border-emerald-500/40 flex items-center justify-center text-emerald-400 animate-swal-icon shadow-lg shadow-emerald-500/20">
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7" />
-                </svg>
+              <div className="w-12 h-12 rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 font-bold">
+                ✕
               </div>
             )}
-
-            <h3 className="text-base font-bold text-slate-100 mt-1">{swalToast.title}</h3>
+            <h3 className="text-sm font-bold text-slate-100">{swalToast.title}</h3>
             <p className="text-xs text-slate-400 leading-relaxed">{swalToast.message}</p>
           </div>
         </div>
