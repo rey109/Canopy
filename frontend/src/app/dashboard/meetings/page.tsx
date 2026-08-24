@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { api, type RapatDetail, type UserDetail, type DivisionDetail, type ProkerDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import QRCode from "qrcode";
 
 interface AttendanceEntry {
   user_nis: string;
@@ -40,6 +41,32 @@ export default function MeetingsPage() {
   const [notulensiIsi, setNotulensiIsi] = useState("");
   const [notulensiStatus, setNotulensiStatus] = useState("Draft");
   const [savingNotulensi, setSavingNotulensi] = useState(false);
+
+  // QR code image URLs (keyed by rapat_id)
+  const [qrImages, setQrImages] = useState<Record<number, string>>({});
+
+  // Generate QR code images when meetings change
+  useEffect(() => {
+    const generateQRCodes = async () => {
+      const newQrImages: Record<number, string> = {};
+      for (const m of meetings) {
+        if (m.qr_code) {
+          try {
+            const dataUrl = await QRCode.toDataURL(m.qr_code, {
+              width: 256,
+              margin: 2,
+              color: { dark: "#1e293b", light: "#ffffff" },
+            });
+            newQrImages[m.rapat_id] = dataUrl;
+          } catch (e) {
+            console.error("QR gen error:", e);
+          }
+        }
+      }
+      setQrImages(newQrImages);
+    };
+    if (meetings.length > 0) generateQRCodes();
+  }, [meetings]);
 
   const fetchMeetingsData = async () => {
     setLoading(true);
@@ -256,10 +283,11 @@ export default function MeetingsPage() {
                 <p className="text-xs text-[var(--text-secondary)] mb-2">📍 Lokasi: {m.lokasi || "—"}</p>
                 <p className="text-xs text-[var(--text-muted)] mb-4">Agenda: {m.agenda || "—"}</p>
 
-                {m.qr_code && (
-                  <div className="p-3 bg-[var(--bg-primary)] rounded border border-[var(--border)] mb-4">
-                    <p className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">QR Code Token (Pajang di Proyektor)</p>
-                    <p className="text-sm font-mono font-bold text-[var(--accent)] select-all mt-1">{m.qr_code}</p>
+                {m.qr_code && qrImages[m.rapat_id] && (
+                  <div className="p-3 bg-[var(--bg-primary)] rounded border border-[var(--border)] mb-4 flex flex-col items-center">
+                    <p className="text-[10px] text-[var(--text-muted)] font-semibold uppercase mb-2">QR Code Presensi — Pajang di Proyektor</p>
+                    <img src={qrImages[m.rapat_id]} alt={`QR Rapat ${m.judul}`} className="w-48 h-48" />
+                    <p className="text-[10px] text-[var(--text-muted)] mt-2">Peserta scan QR ini untuk presensi Hadir/Izin/Sakit</p>
                   </div>
                 )}
               </div>

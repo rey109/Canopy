@@ -562,6 +562,9 @@ export const api = {
   getMeeting: (id: number) =>
     request<RapatDetail>(`/rapat/${id}`),
 
+  lookupRapatByQR: (qr_token: string) =>
+    request<RapatDetail>(`/rapat/lookup-qr?qr_token=${encodeURIComponent(qr_token)}`),
+
   updateStatusRapat: (id: number, status: string) =>
     request<{ message: string }>(`/rapat/${id}/status`, {
       method: "PUT",
