@@ -277,14 +277,11 @@ export default function MemberPage() {
   const uNis = user?.nis || "";
 
   const canEditMembers =
-    !user ||
-    uNis === "20003" ||
-    gName.includes("sekre") ||
-    rName.includes("sekre") ||
-    uName.includes("sekre") ||
-    gName.includes("sekretar") ||
-    rName.includes("sekretar") ||
-    uName.includes("sekretar");
+    gName === "sekretaris" ||
+    rName === "sekretaris" ||
+    gName === "trimitra" ||
+    rName === "ketua" ||
+    uNis === "20003";
 
   return (
     <div className="space-y-6 animate-fade-in text-slate-100 font-sans pb-12">

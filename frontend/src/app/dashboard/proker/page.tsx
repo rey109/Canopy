@@ -184,6 +184,10 @@ export default function ProkerPage() {
     showSwalAlert("Catatan Pembinaan Terkirim!", "Feedback dan arahan khusus telah berhasil disampaikan kepada Ketua Divisi.", "success");
   };
 
+  const groupName = (user?.group_name || "").toLowerCase();
+  const canManageProker = groupName === "trimitra" || groupName === "sekretaris";
+  const canProvideCoaching = groupName === "trimitra" || groupName === "pembina";
+
   // Filtered List Logic
   const filteredProkers = prokerList.filter((p) => {
     const matchDivisi =
@@ -233,17 +237,20 @@ export default function ProkerPage() {
           </p>
         </div>
 
-        {/* Tombol Buat Proker Baru */}
-        <div>
-          <button
-            onClick={() => setIsAddModalOpen(true)}
+         {/* Tombol Buat Proker Baru */}
+         <div>
+           {canManageProker && (
+           <button
+             onClick={() => setIsAddModalOpen(true)}
             className="px-5 py-2.5 rounded-xl font-bold text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/25 transition-all flex items-center gap-2"
           >
             <span className="text-base leading-none">+</span>
             <span>Buat Proker Baru</span>
-          </button>
-        </div>
-      </div>
+           </button>
+           )}
+         </div>
+       </div>
+
 
       {/* 2. SUMMARY METRICS (GRID 4 KOLOM) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -363,12 +370,15 @@ export default function ProkerPage() {
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
             Klik tombol <strong>"+ Buat Proker Baru"</strong> di atas untuk membuat program kerja pertama organisasi Anda.
           </p>
-          <button
-            onClick={() => setIsAddModalOpen(true)}
-            className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition-all inline-block mt-2"
-          >
-            + Buat Proker Baru
-          </button>
+           {canManageProker && (
+             <button
+               onClick={() => setIsAddModalOpen(true)}
+               className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition-all inline-block mt-2"
+             >
+               + Buat Proker Baru
+             </button>
+           )}
+
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -707,7 +717,9 @@ export default function ProkerPage() {
               </div>
 
               {/* Form Input Catatan Baru */}
-              <form onSubmit={handleAddCatatanPembinaan} className="space-y-3 bg-slate-950 p-4 rounded-2xl border border-slate-800">
+               {canProvideCoaching && (
+               <form onSubmit={handleAddCatatanPembinaan} className="space-y-3 bg-slate-950 p-4 rounded-2xl border border-slate-800">
+
                 <label className="block text-xs font-semibold text-slate-300">
                   Tulis Arahan / Catatan Evaluasi untuk Ketua Divisi:
                 </label>
@@ -728,9 +740,10 @@ export default function ProkerPage() {
                     <span>➔</span>
                   </button>
                 </div>
-              </form>
+               </form>
+               )}
 
-              {/* Existing Feedback Notes Timeline */}
+               {/* Existing Feedback Notes Timeline */}
               <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
                 {selectedProker.catatanPembinaan.length === 0 ? (
                   <div className="text-center py-6 text-xs text-slate-500 italic border border-dashed border-slate-800 rounded-xl">
@@ -762,12 +775,15 @@ export default function ProkerPage() {
 
             {/* Modal Footer */}
             <div className="flex items-center justify-between pt-3 border-t border-slate-800">
-              <button
-                onClick={() => setProkerToDelete(selectedProker)}
-                className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-all flex items-center gap-1.5"
-              >
-                🗑️ Hapus Proker
-              </button>
+               {canManageProker && (
+                 <button
+                   onClick={() => setProkerToDelete(selectedProker)}
+                   className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition-all flex items-center gap-1.5"
+                 >
+                   🗑️ Hapus Proker
+                 </button>
+               )}
+
               <button
                 onClick={() => setSelectedProker(null)}
                 className="px-5 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors"
