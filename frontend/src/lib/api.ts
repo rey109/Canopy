@@ -290,6 +290,31 @@ export interface ListPresensiResponse {
   presensi: PresensiDetail[];
 }
 
+export interface RiwayatDetailItem {
+  nis: string;
+  nama: string;
+  tipe: string;
+  keterangan: string;
+}
+
+export interface RiwayatPresensiItem {
+  rapat_id: number;
+  judul: string;
+  tanggal: string;
+  lokasi: string;
+  status_rapat: string;
+  total_hadir: number;
+  total_izin: number;
+  total_sakit: number;
+  total_alpa: number;
+  total_peserta: number;
+  details: RiwayatDetailItem[];
+}
+
+export interface ListRiwayatResponse {
+  riwayat: RiwayatPresensiItem[];
+}
+
 export interface AssetDetail {
   asset_id: number;
   nama: string;
@@ -964,19 +989,20 @@ export const api = {
           const meetings = JSON.parse(localStorage.getItem("canopy_local_meetings") || "[]") as RapatDetail[];
           const items: NotulensiListItem[] = Object.values(map).map((n) => {
             const rapat = meetings.find((m) => m.rapat_id === n.rapat_id);
-            return {
-              notulensi_id: n.notulensi_id,
-              rapat_id: n.rapat_id,
-              judul_rapat: rapat?.judul || `Rapat #${n.rapat_id}`,
-              tanggal_rapat: rapat?.tanggal || n.updated_at,
-              lokasi_rapat: rapat?.lokasi || "",
-              status_rapat: rapat?.status || "Terjadwal",
-              division_id: rapat?.division_id || null,
-              dibuat_oleh: rapat?.dibuat_oleh || "",
-              isi: n.isi,
-              attachments: n.attachments || [],
-              status: n.status,
-              difinalisasi_oleh: n.difinalisasi_oleh || null,
+              return {
+                notulensi_id: n.notulensi_id,
+                rapat_id: n.rapat_id,
+                judul_rapat: rapat?.judul || `Rapat #${n.rapat_id}`,
+                tanggal_rapat: rapat?.tanggal || n.updated_at,
+                lokasi_rapat: rapat?.lokasi || "",
+                status_rapat: rapat?.status || "Terjadwal",
+                division_id: rapat?.division_id || null,
+                dibuat_oleh: rapat?.dibuat_oleh || "",
+                isi: n.isi,
+                notulis: "",
+                attachments: n.attachments || [],
+                status: n.status,
+                difinalisasi_oleh: n.difinalisasi_oleh || null,
               updated_at: n.updated_at,
             };
           });
@@ -1017,6 +1043,9 @@ export const api = {
 
   listPresensiMenunggu: () =>
     request<ListPresensiResponse>("/presensi/menunggu"),
+
+  listRiwayatPresensi: () =>
+    request<ListRiwayatResponse>("/presensi/riwayat"),
 
   // Assets
   listAssets: () =>
