@@ -355,9 +355,10 @@ export default function Sidebar() {
       <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
         {navItems.map((item, idx) => {
            const itemPath = item.href.split("?")[0];
+           const itemView = new URLSearchParams(item.href.split("?")[1] || "").get("view");
+           const currentView = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("view") : null;
            const isActive =
-             pathname === itemPath ||
-             (itemPath !== "/dashboard" && pathname.startsWith(itemPath));
+             pathname === itemPath && (!itemView || currentView === itemView);
 
           // Style aksen khusus untuk role module (spec 06)
           const itemClass = item.isSpecial
