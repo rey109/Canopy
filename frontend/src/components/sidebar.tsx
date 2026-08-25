@@ -219,7 +219,6 @@ const hrefMap: Record<string, string> = {
   "Verifikasi Nota": "/dashboard/finance",
   "Approval Berisiko": "/dashboard/finance",
   "Dokumen": "/dashboard/secretary",
-  "Notulensi": "/dashboard/notulensi",
   "Pengumuman": "/dashboard/updates",
   "Presensi": "/dashboard/attendance",
   "Aset & Sarana": "/dashboard/assets",
