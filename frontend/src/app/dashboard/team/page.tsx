@@ -98,7 +98,7 @@ export default function MemberPage() {
     try {
       const usersRes = await api.listUsers().catch(() => null);
       if (usersRes?.users && usersRes.users.length > 0) {
-        loadedMembers = usersRes.users.map((u) => {
+        loadedMembers = usersRes.users.map((u: UIUserDetail) => {
           const matchedDiv = divs.find((d) => d.division_id === u.division_id);
           return {
             ...u,

@@ -161,6 +161,15 @@ const iconMap: Record<string, React.ReactNode> = {
       <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
     </svg>
   ),
+  "Absensi": (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+      <path d="M9 16l2 2 4-4" />
+    </svg>
+  ),
   "Aset": (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
@@ -217,22 +226,12 @@ const hrefMap: Record<string, string> = {
   "Notifikasi": "/dashboard/notifications",
   "Profile": "/dashboard/profile",
   "Setting": "/dashboard/settings",
+  "Absensi": "/dashboard/attendance",
   "Aset": "/dashboard/assets",
   "Handover": "/dashboard/handover",
   "Public Portal": "/dashboard/public",
 };
 
-// Modul Manajemen items (dipindahkan dari dashboard center ke sidebar)
-const modulManajemen: { label: string; key: string }[] = [
-  { label: "Dashboard", key: "Dashboard" },
-  { label: "Proker", key: "Program Kerja" },
-  { label: "Keuangan", key: "Keuangan" },
-  { label: "Rapat", key: "Rapat" },
-  { label: "Notulensi", key: "Notulensi" },
-  { label: "Aset", key: "Aset" },
-  { label: "Handover", key: "Handover" },
-  { label: "Public Portal", key: "Public Portal" },
-];
 
 interface RenderItem {
   label: string;

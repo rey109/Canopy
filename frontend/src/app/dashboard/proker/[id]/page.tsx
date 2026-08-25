@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import { api, type ProkerDetail, type TaskDetail, type TransaksiDetail, type DokumenDetail, type PresensiDetail, type UserDetail, type RapatDetail, type NotulensiDetail } from "@/lib/api";
+import { api, type ProkerDetail, type TaskDetail, type TransaksiDetail, type DokumenDetail, type PresensiDetail, type UserDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
 
@@ -20,12 +20,11 @@ export default function ProkerDetailPage({ params }: PageProps) {
   const [documents, setDocuments] = useState<DokumenDetail[]>([]);
   const [attendance, setAttendance] = useState<PresensiDetail[]>([]);
   const [users, setUsers] = useState<UserDetail[]>([]);
+  const [pengajuanProker, setPengajuanProker] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [meetings, setMeetings] = useState<RapatDetail[]>([]);
-  const [notulensis, setNotulensis] = useState<Record<number, NotulensiDetail>>({});
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<"overview" | "tasks" | "finance" | "docs" | "meetings">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "tasks" | "finance" | "docs" | "presensi">("overview");
 
   // Overview Note Form (Pembina only)
   const [coachingNote, setCoachingNote] = useState("");
@@ -42,14 +41,14 @@ export default function ProkerDetailPage({ params }: PageProps) {
 
   const fetchDetailData = async () => {
     try {
-      const [pRes, tRes, txRes, dRes, uRes, nRes, mRes] = await Promise.allSettled([
+      const [pRes, tRes, txRes, dRes, uRes, nRes, pjRes] = await Promise.allSettled([
         api.getProker(prokerId),
         api.listTasks(),
         api.listTransactions(),
         api.listDokumen(),
         api.listUsers(),
         api.listCatatanPembinaan(prokerId),
-        api.listMeetings(),
+        api.listPengajuan().catch(() => ({ pengajuan: [] as any[] })),
       ]);
 
       if (pRes.status === "fulfilled") setProker(pRes.value);
@@ -68,24 +67,9 @@ export default function ProkerDetailPage({ params }: PageProps) {
       if (nRes.status === "fulfilled") {
         setNotesList(nRes.value.catatan || []);
       }
-
-      if (mRes.status === "fulfilled") {
-        const filteredMeetings = mRes.value.rapat.filter(m => m.proker_id === prokerId) || [];
-        setMeetings(filteredMeetings);
-
-        // Fetch notulensi for each meeting
-        const notesMap: Record<number, NotulensiDetail> = {};
-        await Promise.all(
-          filteredMeetings.map(async (m) => {
-            try {
-              const note = await api.getNotulensi(m.rapat_id);
-              notesMap[m.rapat_id] = note;
-            } catch {
-              // Notulensi belum ada, abaikan
-            }
-          })
-        );
-        setNotulensis(notesMap);
+      if (pjRes.status === "fulfilled") {
+        const pjList = (pjRes.value as any).pengajuan || [];
+        setPengajuanProker(pjList.filter((p: any) => p.proker_id === prokerId));
       }
     } catch (e) {
       console.error(e);
@@ -167,7 +151,7 @@ export default function ProkerDetailPage({ params }: PageProps) {
 
   const isPembina = user?.group_name === "Pembina";
   const isKetuaBidang = user?.group_name === "Kepala Divisi";
-  const canManageTask = (isKetuaBidang && user?.division_id === proker.division_id) || user?.group_name === "Trimitra";
+  const canManageTask = isKetuaBidang && user?.division_id === proker.division_id;
 
   // Hitung pemakaian budget proker
   const totalTerpakai = transactions.filter(t => t.status === "Disetujui" && t.jenis === "Keluar").reduce((sum, t) => sum + t.nominal, 0);
@@ -210,7 +194,7 @@ export default function ProkerDetailPage({ params }: PageProps) {
 
       {/* Sub-tab Navigation */}
       <div className="flex border-b border-[var(--border)] overflow-x-auto">
-        {(["overview", "tasks", "finance", "docs", "meetings"] as const).map((tab) => (
+        {(["overview", "tasks", "finance", "docs", "presensi"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -220,7 +204,7 @@ export default function ProkerDetailPage({ params }: PageProps) {
                 : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             }`}
           >
-            {tab === "docs" ? "Dokumen" : tab === "meetings" ? "Rapat & Notulensi" : tab}
+            {tab === "docs" ? "Dokumen" : tab}
           </button>
         ))}
       </div>
@@ -301,7 +285,7 @@ export default function ProkerDetailPage({ params }: PageProps) {
             {tasks.length === 0 ? (
               <p className="text-xs text-[var(--text-muted)] text-center py-12">Belum ada tugas dibuat.</p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-3Staf">
                 {tasks.map(t => (
                   <div key={t.task_id} className="p-3 bg-[var(--bg-primary)] rounded border border-[var(--border)] flex justify-between items-center gap-3">
                     <div>
@@ -366,42 +350,86 @@ export default function ProkerDetailPage({ params }: PageProps) {
 
       {/* Tab: Finance */}
       {activeTab === "finance" && (
-        <div className="glass-card p-6 space-y-4">
-          <h2 className="text-base font-semibold">Riwayat Transaksi Anggaran</h2>
-          {transactions.length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] text-center py-12">Belum ada catatan pengeluaran/pemasukan proker ini.</p>
-          ) : (
-            <div className="table-container">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Tanggal</th>
-                    <th>Deskripsi</th>
-                    <th>Kategori</th>
-                    <th>Jenis</th>
-                    <th>Nominal</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {transactions.map(t => (
-                    <tr key={t.transaksi_id}>
-                      <td>{new Date(t.tanggal).toLocaleDateString("id-ID")}</td>
-                      <td>{t.deskripsi}</td>
-                      <td>{t.kategori_nama || "Lain-lain"}</td>
-                      <td>
-                        <span className={`badge ${t.jenis === "Masuk" ? "badge-success" : "badge-danger"}`}>{t.jenis}</span>
-                      </td>
-                      <td className={`font-semibold ${t.jenis === "Masuk" ? "text-emerald-400" : "text-red-400"}`}>
-                        {formatCurrency(t.nominal)}
-                      </td>
-                      <td>{t.status}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        <div className="space-y-6">
+          {/* Keuangan Proker Summary */}
+          {proker && (
+            <div className="glass-card p-6 space-y-4">
+              <h2 className="text-base font-semibold">Keuangan Proker</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="bg-[var(--bg-primary)] p-3 rounded">
+                  <p className="text-xs text-[var(--text-muted)]">Total Anggaran</p>
+                  <p className="font-bold text-blue-400">{formatCurrency(proker.anggaran_disetujui)}</p>
+                </div>
+                <div className="bg-[var(--bg-primary)] p-3 rounded">
+                  <p className="text-xs text-[var(--text-muted)]">Total Pengeluaran</p>
+                  <p className="font-bold text-red-400">{formatCurrency(transactions.filter(t=>t.jenis==="Keluar" && (t.status==="Disetujui"||t.status==="Terverifikasi")).reduce((s,t)=>s+t.nominal,0))}</p>
+                </div>
+                <div className="bg-[var(--bg-primary)] p-3 rounded">
+                  <p className="text-xs text-[var(--text-muted)]">Total Pemasukan</p>
+                  <p className="font-bold text-emerald-400">{formatCurrency(transactions.filter(t=>t.jenis==="Masuk" && (t.status==="Disetujui"||t.status==="Terverifikasi")).reduce((s,t)=>s+t.nominal,0))}</p>
+                </div>
+                <div className="bg-[var(--bg-primary)] p-3 rounded">
+                  <p className="text-xs text-[var(--text-muted)]">Sisa Anggaran</p>
+                  <p className="font-bold text-[var(--text-primary)]">{formatCurrency(proker.anggaran_disetujui - transactions.filter(t=>t.jenis==="Keluar" && (t.status==="Disetujui"||t.status==="Terverifikasi")).reduce((s,t)=>s+t.nominal,0) + transactions.filter(t=>t.jenis==="Masuk" && (t.status==="Disetujui"||t.status==="Terverifikasi")).reduce((s,t)=>s+t.nominal,0))}</p>
+                </div>
+              </div>
+              <div className="text-xs text-[var(--text-muted)]">Data keuangan proker menggunakan relasi database yang sama dengan Buku Kas.</div>
             </div>
           )}
+          <div className="glass-card p-6 space-y-4">
+            <h2 className="text-base font-semibold">Pengajuan Dana Proker</h2>
+            {pengajuanProker.length === 0 ? <p className="text-xs text-[var(--text-muted)] text-center py-4">Belum ada pengajuan dana untuk proker ini.</p> : (
+              <div className="space-y-2">
+                {pengajuanProker.map((p:any)=>(
+                  <div key={p.pengajuan_id} className="p-3 bg-[var(--bg-primary)] rounded border text-xs flex justify-between">
+                    <span>{p.nama_pengajuan} - {formatCurrency(p.nominal)} - <span className="badge text-[10px]">{p.status}</span></span>
+                    <span>SEKBID {p.division_id}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="glass-card p-6 space-y-4">
+            <h2 className="text-base font-semibold">Riwayat Transaksi Anggaran</h2>
+            {transactions.length === 0 ? (
+              <p className="text-xs text-[var(--text-muted)] text-center py-12">Belum ada catatan pengeluaran/pemasukan proker ini.</p>
+            ) : (
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Tanggal</th>
+                      <th>Deskripsi</th>
+                      <th>Sekbid</th>
+                      <th>Kategori</th>
+                      <th>Jenis</th>
+                      <th>Nominal</th>
+                      <th>Status</th>
+                      <th>Bukti</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transactions.map(t => (
+                      <tr key={t.transaksi_id}>
+                        <td>{new Date(t.tanggal).toLocaleDateString("id-ID")}</td>
+                        <td>{t.deskripsi}</td>
+                        <td className="text-xs">{t.division_id ? `SEKBID ${t.division_id}` : "-"}</td>
+                        <td>{t.kategori_nama || "Lain-lain"}</td>
+                        <td>
+                          <span className={`badge ${t.jenis === "Masuk" ? "badge-success" : "badge-danger"}`}>{t.jenis}</span>
+                        </td>
+                        <td className={`font-semibold ${t.jenis === "Masuk" ? "text-emerald-400" : "text-red-400"}`}>
+                          {formatCurrency(t.nominal)}
+                        </td>
+                        <td>{t.status}</td>
+                        <td className="text-xs">{t.bukti_url ? <a href={t.bukti_url} target="_blank" rel="noreferrer" className="text-[var(--accent)] hover:underline">Lihat</a> : "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -430,74 +458,10 @@ export default function ProkerDetailPage({ params }: PageProps) {
         </div>
       )}
 
-      {/* Tab: Meetings */}
-      {activeTab === "meetings" && (
-        <div className="glass-card p-6 space-y-6">
-          <div className="flex justify-between items-center">
-            <h2 className="text-base font-semibold">Rapat & Kegiatan Terkait</h2>
-            <Link href="/dashboard/meetings" className="btn-primary text-xs py-1.5 px-3">
-              + Jadwalkan Rapat
-            </Link>
-          </div>
-          {meetings.length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] text-center py-12">Belum ada rapat terkait program kerja ini.</p>
-          ) : (
-            <div className="space-y-4">
-              {meetings.map((m) => {
-                const note = notulensis[m.rapat_id];
-                return (
-                  <div key={m.rapat_id} className="p-4 bg-[var(--bg-primary)] rounded-lg border border-[var(--border)] space-y-3">
-                    <div className="flex justify-between items-start gap-2">
-                      <div>
-                        <h3 className="font-semibold text-sm">{m.judul}</h3>
-                        <p className="text-xs text-[var(--text-muted)] mt-0.5">
-                          📅 {new Date(m.tanggal).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })} | 📍 {m.lokasi || "—"}
-                        </p>
-                      </div>
-                      <span className={`badge text-xs ${m.status === "Selesai" ? "badge-success" : m.status === "Berlangsung" ? "badge-info" : m.status === "Dibatalkan" ? "badge-error" : "badge-neutral"}`}>
-                        {m.status}
-                      </span>
-                    </div>
-
-                    {note ? (
-                      <div className="border-t border-[var(--border)] pt-2 mt-2 space-y-2">
-                        <div className="flex justify-between items-center">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">📝 Notulensi ({note.status})</p>
-                          <Link href={`/dashboard/meetings/${m.rapat_id}`} className="text-xs text-[var(--accent)] hover:underline">
-                            Lihat Selengkapnya
-                          </Link>
-                        </div>
-                        {note.keputusan_rapat && (
-                          <div className="text-xs">
-                            <p className="font-medium text-[var(--text-secondary)]">Keputusan Rapat:</p>
-                            <p className="whitespace-pre-wrap text-[var(--text-muted)]">{note.keputusan_rapat}</p>
-                          </div>
-                        )}
-                        {note.tindak_lanjut && (
-                          <div className="text-xs">
-                            <p className="font-medium text-[var(--text-secondary)]">Tindak Lanjut:</p>
-                            <p className="whitespace-pre-wrap text-[var(--text-muted)]">{note.tindak_lanjut}</p>
-                          </div>
-                        )}
-                        {note.pic && (
-                          <p className="text-[10px] text-[var(--text-muted)]">
-                            PIC: <span className="font-semibold">{note.pic}</span> {note.deadline_tl ? `| Deadline: ${note.deadline_tl}` : ""}
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex justify-between items-center border-t border-[var(--border)] pt-2 text-xs text-[var(--text-muted)]">
-                        <span>Belum ada notulensi.</span>
-                        <Link href={`/dashboard/meetings/${m.rapat_id}`} className="text-xs text-[var(--accent)] hover:underline">
-                          Tulis Notulensi
-                        </Link>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+      {/* Tab: Presensi */}
+      {activeTab === "presensi" && (
+        <div className="glass-card p-6 text-center text-[var(--text-muted)]">
+          <p className="text-sm">Rekap absensi kegiatan hari-H program kerja dapat diakses melalui modul presensi rapat/kegiatan.</p>
         </div>
       )}
     </div>
