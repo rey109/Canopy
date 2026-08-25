@@ -833,11 +833,6 @@ func ApprovalBerisiko(ctx context.Context, id int, params *VerifikasiParams) (*T
 	if ud.GroupName != "Bendahara" || ud.Level != 1 {
 		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Bendahara Umum yang dapat menyetujui transaksi berisiko"}
 	}
-		return nil, &errs.Error{
-			Code:    errs.PermissionDenied,
-			Message: "hanya Bendahara Umum (level 1) yang dapat menyetujui transaksi berisiko",
-		}
-	}
 	var currentStatus string
 	err := db.QueryRow(ctx, `SELECT status FROM transaksi WHERE transaksi_id = $1`, id).Scan(&currentStatus)
 	if err != nil {
