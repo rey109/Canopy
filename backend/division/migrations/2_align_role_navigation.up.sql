@@ -1,3 +1,23 @@
+CREATE TABLE IF NOT EXISTS modules (
+    module_id SERIAL PRIMARY KEY,
+    module_name VARCHAR(100) NOT NULL UNIQUE,
+    is_core BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE IF NOT EXISTS role_group_modules (
+    id SERIAL PRIMARY KEY,
+    group_name VARCHAR(100) NOT NULL,
+    module_id INT NOT NULL REFERENCES modules(module_id),
+    UNIQUE(group_name, module_id)
+);
+
+CREATE TABLE IF NOT EXISTS divisi_modules (
+    id SERIAL PRIMARY KEY,
+    division_id INT NOT NULL,
+    module_id INT NOT NULL REFERENCES modules(module_id),
+    UNIQUE(division_id, module_id)
+);
+
 INSERT INTO modules (module_name, is_core)
 VALUES
     ('Catat Transaksi', FALSE),
