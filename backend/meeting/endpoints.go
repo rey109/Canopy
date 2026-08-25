@@ -79,13 +79,6 @@ func BuatRapat(ctx context.Context, params *CreateRapatParams) (*RapatDetail, er
 		}
 	}
 
-	// Generate QR code token unik
-	qrBytes := make([]byte, 16)
-	if _, err := rand.Read(qrBytes); err != nil {
-		return nil, &errs.Error{Code: errs.Internal, Message: "gagal generate QR token"}
-	}
-	qrToken := hex.EncodeToString(qrBytes)
-
 	var divID sql.NullInt32
 	if params.DivisionID != nil {
 		divID.Valid = true
@@ -100,11 +93,11 @@ func BuatRapat(ctx context.Context, params *CreateRapatParams) (*RapatDetail, er
 			(periode_id, division_id, judul, tanggal, lokasi, agenda, dibuat_oleh, status, qr_code)
 		VALUES (
 			(SELECT periode_id FROM periode WHERE is_aktif = TRUE LIMIT 1),
-			$1, $2, $3, $4, $5, $6, 'Terjadwal', $7
+			$1, $2, $3, $4, $5, $6, 'Terjadwal', NULL
 		)
 		RETURNING rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
 		          dibuat_oleh, status, qr_code, created_at
-	`, divID, params.Judul, params.Tanggal, params.Lokasi, params.Agenda, string(nis), qrToken).
+	`, divID, params.Judul, params.Tanggal, params.Lokasi, params.Agenda, string(nis)).
 		Scan(
 			&r.RapatID, &r.PeriodeID, &retDivID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
 			&r.DibuatOleh, &r.Status, &retQR, &r.CreatedAt,
@@ -140,6 +133,47 @@ func BuatRapat(ctx context.Context, params *CreateRapatParams) (*RapatDetail, er
 	return &r, nil
 }
 
+//encore:api auth path=/rapat/:id/qr method=POST
+func GenerateQRPresensi(ctx context.Context, id int) (*RapatDetail, error) {
+	ud := auth.Data().(*user.UserData)
+	if ud.GroupName != "Sekretaris" && ud.GroupName != "Trimitra" {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Sekretaris atau Trimitra yang dapat membuat QR presensi"}
+	}
+
+	qrBytes := make([]byte, 16)
+	if _, err := rand.Read(qrBytes); err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: "gagal generate QR token"}
+	}
+	qrToken := hex.EncodeToString(qrBytes)
+
+	var r RapatDetail
+	var divID sql.NullInt32
+	var qr sql.NullString
+	err := db.QueryRow(ctx, `
+		UPDATE rapat SET qr_code = $1
+		WHERE rapat_id = $2
+		RETURNING rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
+		          dibuat_oleh, status, qr_code, created_at
+	`, qrToken, id).Scan(
+		&r.RapatID, &r.PeriodeID, &divID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
+		&r.DibuatOleh, &r.Status, &qr, &r.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &errs.Error{Code: errs.NotFound, Message: "rapat tidak ditemukan"}
+		}
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if divID.Valid {
+		v := int(divID.Int32)
+		r.DivisionID = &v
+	}
+	if qr.Valid {
+		r.QRCode = &qr.String
+	}
+	return &r, nil
+}
+
 //encore:api auth path=/rapat method=GET
 func ListRapat(ctx context.Context) (*ListRapatResponse, error) {
 	ud := auth.Data().(*user.UserData)
@@ -152,19 +186,21 @@ func ListRapat(ctx context.Context) (*ListRapatResponse, error) {
 	if ud.HasScopeAll() {
 		rows, err = db.Query(ctx, `
 			SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
-			       dibuat_oleh, status, NULL AS qr_code, created_at
+			       dibuat_oleh, status,
+			       CASE WHEN $1 IN ('Sekretaris', 'Trimitra') THEN qr_code ELSE NULL END AS qr_code,
+			       created_at
 			FROM rapat ORDER BY tanggal DESC
-		`)
+		`, ud.GroupName)
 	} else {
 		rows, err = db.Query(ctx, `
 			SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
 			       dibuat_oleh, status,
-			       CASE WHEN dibuat_oleh = $1 THEN qr_code ELSE NULL END AS qr_code,
+			       CASE WHEN $3 IN ('Sekretaris', 'Trimitra') OR dibuat_oleh = $1 THEN qr_code ELSE NULL END AS qr_code,
 			       created_at
 			FROM rapat
 			WHERE division_id IS NULL OR division_id = $2
 			ORDER BY tanggal DESC
-		`, string(nisStr), ud.DivisionID)
+		`, string(nisStr), ud.DivisionID, ud.GroupName)
 	}
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
@@ -189,10 +225,10 @@ func GetRapat(ctx context.Context, id int) (*RapatDetail, error) {
 	row := db.QueryRow(ctx, `
 		SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
 		       dibuat_oleh, status,
-		       CASE WHEN dibuat_oleh = $1 THEN qr_code ELSE NULL END AS qr_code,
+		       CASE WHEN $3 IN ('Sekretaris', 'Trimitra') THEN qr_code ELSE NULL END AS qr_code,
 		       created_at
 		FROM rapat WHERE rapat_id = $2
-	`, string(nisStr), id)
+	`, string(nisStr), id, auth.Data().(*user.UserData).GroupName)
 	r, err := scanRapat(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
