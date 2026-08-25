@@ -20,6 +20,7 @@ export default function ProkerDetailPage({ params }: PageProps) {
   const [documents, setDocuments] = useState<DokumenDetail[]>([]);
   const [attendance, setAttendance] = useState<PresensiDetail[]>([]);
   const [users, setUsers] = useState<UserDetail[]>([]);
+  const [pengajuanProker, setPengajuanProker] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Tab State
@@ -40,13 +41,14 @@ export default function ProkerDetailPage({ params }: PageProps) {
 
   const fetchDetailData = async () => {
     try {
-      const [pRes, tRes, txRes, dRes, uRes, nRes] = await Promise.allSettled([
+      const [pRes, tRes, txRes, dRes, uRes, nRes, pjRes] = await Promise.allSettled([
         api.getProker(prokerId),
         api.listTasks(),
         api.listTransactions(),
         api.listDokumen(),
         api.listUsers(),
         api.listCatatanPembinaan(prokerId),
+        api.listPengajuan().catch(() => ({ pengajuan: [] as any[] })),
       ]);
 
       if (pRes.status === "fulfilled") setProker(pRes.value);
@@ -64,6 +66,10 @@ export default function ProkerDetailPage({ params }: PageProps) {
       }
       if (nRes.status === "fulfilled") {
         setNotesList(nRes.value.catatan || []);
+      }
+      if (pjRes.status === "fulfilled") {
+        const pjList = (pjRes.value as any).pengajuan || [];
+        setPengajuanProker(pjList.filter((p: any) => p.proker_id === prokerId));
       }
     } catch (e) {
       console.error(e);
@@ -344,42 +350,86 @@ export default function ProkerDetailPage({ params }: PageProps) {
 
       {/* Tab: Finance */}
       {activeTab === "finance" && (
-        <div className="glass-card p-6 space-y-4">
-          <h2 className="text-base font-semibold">Riwayat Transaksi Anggaran</h2>
-          {transactions.length === 0 ? (
-            <p className="text-xs text-[var(--text-muted)] text-center py-12">Belum ada catatan pengeluaran/pemasukan proker ini.</p>
-          ) : (
-            <div className="table-container">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Tanggal</th>
-                    <th>Deskripsi</th>
-                    <th>Kategori</th>
-                    <th>Jenis</th>
-                    <th>Nominal</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {transactions.map(t => (
-                    <tr key={t.transaksi_id}>
-                      <td>{new Date(t.tanggal).toLocaleDateString("id-ID")}</td>
-                      <td>{t.deskripsi}</td>
-                      <td>{t.kategori_nama || "Lain-lain"}</td>
-                      <td>
-                        <span className={`badge ${t.jenis === "Masuk" ? "badge-success" : "badge-danger"}`}>{t.jenis}</span>
-                      </td>
-                      <td className={`font-semibold ${t.jenis === "Masuk" ? "text-emerald-400" : "text-red-400"}`}>
-                        {formatCurrency(t.nominal)}
-                      </td>
-                      <td>{t.status}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        <div className="space-y-6">
+          {/* Keuangan Proker Summary */}
+          {proker && (
+            <div className="glass-card p-6 space-y-4">
+              <h2 className="text-base font-semibold">Keuangan Proker</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div className="bg-[var(--bg-primary)] p-3 rounded">
+                  <p className="text-xs text-[var(--text-muted)]">Total Anggaran</p>
+                  <p className="font-bold text-blue-400">{formatCurrency(proker.anggaran_disetujui)}</p>
+                </div>
+                <div className="bg-[var(--bg-primary)] p-3 rounded">
+                  <p className="text-xs text-[var(--text-muted)]">Total Pengeluaran</p>
+                  <p className="font-bold text-red-400">{formatCurrency(transactions.filter(t=>t.jenis==="Keluar" && (t.status==="Disetujui"||t.status==="Terverifikasi")).reduce((s,t)=>s+t.nominal,0))}</p>
+                </div>
+                <div className="bg-[var(--bg-primary)] p-3 rounded">
+                  <p className="text-xs text-[var(--text-muted)]">Total Pemasukan</p>
+                  <p className="font-bold text-emerald-400">{formatCurrency(transactions.filter(t=>t.jenis==="Masuk" && (t.status==="Disetujui"||t.status==="Terverifikasi")).reduce((s,t)=>s+t.nominal,0))}</p>
+                </div>
+                <div className="bg-[var(--bg-primary)] p-3 rounded">
+                  <p className="text-xs text-[var(--text-muted)]">Sisa Anggaran</p>
+                  <p className="font-bold text-[var(--text-primary)]">{formatCurrency(proker.anggaran_disetujui - transactions.filter(t=>t.jenis==="Keluar" && (t.status==="Disetujui"||t.status==="Terverifikasi")).reduce((s,t)=>s+t.nominal,0) + transactions.filter(t=>t.jenis==="Masuk" && (t.status==="Disetujui"||t.status==="Terverifikasi")).reduce((s,t)=>s+t.nominal,0))}</p>
+                </div>
+              </div>
+              <div className="text-xs text-[var(--text-muted)]">Data keuangan proker menggunakan relasi database yang sama dengan Buku Kas.</div>
             </div>
           )}
+          <div className="glass-card p-6 space-y-4">
+            <h2 className="text-base font-semibold">Pengajuan Dana Proker</h2>
+            {pengajuanProker.length === 0 ? <p className="text-xs text-[var(--text-muted)] text-center py-4">Belum ada pengajuan dana untuk proker ini.</p> : (
+              <div className="space-y-2">
+                {pengajuanProker.map((p:any)=>(
+                  <div key={p.pengajuan_id} className="p-3 bg-[var(--bg-primary)] rounded border text-xs flex justify-between">
+                    <span>{p.nama_pengajuan} - {formatCurrency(p.nominal)} - <span className="badge text-[10px]">{p.status}</span></span>
+                    <span>SEKBID {p.division_id}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="glass-card p-6 space-y-4">
+            <h2 className="text-base font-semibold">Riwayat Transaksi Anggaran</h2>
+            {transactions.length === 0 ? (
+              <p className="text-xs text-[var(--text-muted)] text-center py-12">Belum ada catatan pengeluaran/pemasukan proker ini.</p>
+            ) : (
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Tanggal</th>
+                      <th>Deskripsi</th>
+                      <th>Sekbid</th>
+                      <th>Kategori</th>
+                      <th>Jenis</th>
+                      <th>Nominal</th>
+                      <th>Status</th>
+                      <th>Bukti</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transactions.map(t => (
+                      <tr key={t.transaksi_id}>
+                        <td>{new Date(t.tanggal).toLocaleDateString("id-ID")}</td>
+                        <td>{t.deskripsi}</td>
+                        <td className="text-xs">{t.division_id ? `SEKBID ${t.division_id}` : "-"}</td>
+                        <td>{t.kategori_nama || "Lain-lain"}</td>
+                        <td>
+                          <span className={`badge ${t.jenis === "Masuk" ? "badge-success" : "badge-danger"}`}>{t.jenis}</span>
+                        </td>
+                        <td className={`font-semibold ${t.jenis === "Masuk" ? "text-emerald-400" : "text-red-400"}`}>
+                          {formatCurrency(t.nominal)}
+                        </td>
+                        <td>{t.status}</td>
+                        <td className="text-xs">{t.bukti_url ? <a href={t.bukti_url} target="_blank" rel="noreferrer" className="text-[var(--accent)] hover:underline">Lihat</a> : "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
