@@ -3,9 +3,12 @@
 import { useEffect, useState } from "react";
 import { api, type TransaksiDetail, type ProkerDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { canApproveRisk, canManageFinance } from "@/lib/role-access";
 
 export default function FinancePage() {
   const { user } = useAuth();
+  const canManage = canManageFinance(user);
+  const canApprove = canApproveRisk(user);
   const [activeTab, setActiveTab] = useState<"kas" | "verifikasi" | "berisiko">("kas");
   const [txns, setTxns] = useState<TransaksiDetail[]>([]);
   const [verifikasiList, setVerifikasiList] = useState<TransaksiDetail[]>([]);
@@ -63,7 +66,7 @@ export default function FinancePage() {
 
       // Load antrian verifikasi & approval berisiko jika Bendahara/Trimitra
       const gName = user?.group_name;
-      if (gName === "Bendahara" || gName === "Trimitra") {
+       if (gName === "Bendahara") {
         const [verif, risk] = await Promise.allSettled([
           api.listMenungguVerifikasi(),
           api.listMenungguApprovalBerisiko(),
@@ -151,9 +154,9 @@ export default function FinancePage() {
   const isBendahara = gName === "Bendahara";
   const isTrimitra = gName === "Trimitra";
   const isPembina = gName === "Pembina";
-  const canWrite = isBendahara || isTrimitra;
-  const isBendaharaUmum = isBendahara && user?.level === 1;
-  const showRiskTab = isBendaharaUmum || isTrimitra;
+  const financeScope = isBendahara && user?.scope_divisi_awal != null ? `Scope Sekbid ${user.scope_divisi_awal}–${user.scope_divisi_akhir}` : "Organisasi penuh";
+  const canWrite = canManage;
+  const showRiskTab = canApprove;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -161,7 +164,7 @@ export default function FinancePage() {
         <div>
           <h1 className="text-2xl font-bold">Keuangan & Kas</h1>
           <p className="text-[var(--text-secondary)] text-sm mt-1">
-            Buku besar keuangan dan riwayat transaksi real-time
+             Buku besar keuangan dan riwayat transaksi real-time · {financeScope}
           </p>
         </div>
         {canWrite && (
@@ -176,9 +179,9 @@ export default function FinancePage() {
       </div>
 
       {/* Tab Selector */}
-      {canWrite && (
+      {(canWrite || canApprove) && (
         <div className="flex border-b border-[var(--border)]">
-          <button
+          {canWrite && <button
             onClick={() => setActiveTab("kas")}
             className={`px-4 py-2 border-b-2 text-sm font-medium transition-all ${
               activeTab === "kas"
@@ -187,8 +190,8 @@ export default function FinancePage() {
             }`}
           >
             Buku Kas
-          </button>
-          <button
+          </button>}
+          {canWrite && <button
             onClick={() => setActiveTab("verifikasi")}
             className={`px-4 py-2 border-b-2 text-sm font-medium transition-all flex items-center gap-1.5 ${
               activeTab === "verifikasi"
@@ -200,7 +203,7 @@ export default function FinancePage() {
             {verifikasiList.length > 0 && (
               <span className="badge badge-warning text-[10px]">{verifikasiList.length}</span>
             )}
-          </button>
+          </button>}
           {showRiskTab && (
             <button
               onClick={() => setActiveTab("berisiko")}

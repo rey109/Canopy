@@ -19,6 +19,7 @@ export default function AttendancePage() {
     user?.group_name === "Sekretaris" || 
     user?.group_name === "Trimitra" || 
     user?.group_name === "Pembina";
+  const canVerify = user?.group_name === "Sekretaris";
 
   const rekapTitle = 
     user?.group_name === "Kepala Divisi" ? "Rekap Divisi" :
@@ -29,9 +30,9 @@ export default function AttendancePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Kehadiran</h1>
-        <p className="text-[var(--text-muted)] text-sm mt-1">
-          Pantau status kehadiran kegiatan organisasi.
-        </p>
+           <p className="text-[var(--text-muted)] text-sm mt-1">
+           Pantau status kehadiran kegiatan organisasi.{canVerify ? " Verifikasi izin dan sakit tersedia untuk scope sekretariat." : ""}
+         </p>
       </div>
 
       {canSeeRekap && (

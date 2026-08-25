@@ -33,6 +33,27 @@ html {
 
 body {
   background: var(--bg-primary);
+  min-width: 320px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, a, input, select, textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 767px) {
+  .btn-primary, .btn-secondary, .btn-danger {
+    min-height: 44px;
+  }
+
+  .input-field {
+    min-height: 46px;
+    font-size: 16px;
+  }
+
+  .table-container {
+    margin-inline: -0.25rem;
+  }
 }
 
 /* Glass card */

@@ -1,4 +1,6 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://staging-canopy-3xyi.encr.app";
+const API_BASE = typeof window !== "undefined" && window.location.hostname === "localhost"
+  ? "/api-backend"
+  : process.env.NEXT_PUBLIC_API_URL || "https://staging-canopy-3xyi.encr.app";
 
 async function request<T>(
   path: string,
@@ -15,6 +17,9 @@ async function request<T>(
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
+  if (typeof window !== "undefined" && window.location.hostname === "localhost") {
+    headers["X-Canopy-Client"] = "local-dev";
+  }
 
   try {
     const res = await fetch(`${API_BASE}${path}`, {
@@ -28,8 +33,8 @@ async function request<T>(
     }
 
     return await res.json();
-  } catch (err: any) {
-    if (err.name === "TypeError" || err.message === "Failed to fetch") {
+  } catch (err: unknown) {
+    if (err instanceof TypeError || (err instanceof Error && err.message === "Failed to fetch")) {
       throw new Error("Gagal terhubung ke server. Periksa koneksi internet atau server backend.");
     }
     throw err;
@@ -320,6 +325,17 @@ export interface ListPeminjamanResponse {
   peminjaman: PeminjamanDetail[];
 }
 
+export interface B1Event { id: number; title: string; date: string; description: string; }
+export interface B2Record { id: number; student_name: string; student_class: string; record_type: string; points: number; description: string; }
+export interface B3Roster { id: number; date: string; leader_name: string; mc_name: string; flag_bearers: string; }
+export interface B4Competition { id: number; student_name: string; competition_name: string; achievement: string; type: string; }
+export interface B5Survey { id: number; topic: string; yes_votes: number; no_votes: number; }
+export interface B6Sale { id: number; item_name: string; quantity: number; price: number; type: string; }
+export interface B7Visit { id: number; student_name: string; complaint: string; treatment: string; visit_date: string; }
+export interface B8Mading { id: number; title: string; content: string; author: string; created_at: string; }
+export interface B9Link { id: number; platform: string; label: string; url: string; }
+export interface B10Word { id: number; word: string; language: string; meaning: string; example: string; }
+
 export interface HandoverDetail {
   id: number;
   periode_lama: string;
@@ -448,6 +464,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+
+  updateProkerStatus: (id: number, status: string) => request<{ message: string }>(`/proker/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) }),
 
   // Task Template
   createTaskTemplate: (data: {
@@ -598,141 +616,57 @@ export const api = {
       body: JSON.stringify({ keputusan, catatan }),
     }),
 
-  // Meetings with resilient storage fallback
-  listMeetings: async (): Promise<{ rapat: RapatDetail[] }> => {
-    try {
-      const res = await request<{ rapat: RapatDetail[] }>("/rapat");
-      if (res && Array.isArray(res.rapat)) {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("canopy_local_meetings", JSON.stringify(res.rapat));
-        }
-        return res;
-      }
-    } catch (e) {
-      console.warn("Backend unavailable, loading local meetings:", e);
+  // Meetings
+  listMeetings: () => request<{ rapat: RapatDetail[] }>("/rapat"),
+  createMeeting: (data: {
+    division_id?: number;
+    judul: string;
+    tanggal: string;
+    lokasi: string;
+    agenda: string;
+  }) => request<RapatDetail>("/rapat", { method: "POST", body: JSON.stringify(data) }),
+
+  getMeeting: (id: number) =>
+    request<RapatDetail>(`/rapat/${id}`),
+
+  updateMeeting: (
+    id: number,
+    data: {
+      judul?: string;
+      tanggal?: string;
+      lokasi?: string;
+      agenda?: string;
+      division_id?: number | null;
+      status?: string;
     }
-    if (typeof window !== "undefined") {
-      const local = localStorage.getItem("canopy_local_meetings");
-      if (local) {
-        try {
-          return { rapat: JSON.parse(local) };
-        } catch {}
-      }
-    }
-    const defaultMeetings: RapatDetail[] = [
-      {
-        rapat_id: 101,
-        periode_id: 1,
-        division_id: null,
-        judul: "[BPH] Rapat Koordinasi Mingguan BPH",
-        tanggal: new Date(Date.now() + 86400000).toISOString(),
-        lokasi: "Ruang OSIS",
-        agenda: "Evaluasi program kerja mingguan dan persiapan classmeeting",
-        dibuat_oleh: "20011",
-        status: "Terjadwal",
-        created_at: new Date().toISOString(),
-        qr_code: "QR-BPH-2026",
-      },
-      {
-        rapat_id: 102,
-        periode_id: 1,
-        division_id: 1,
-        judul: "Rapat Persiapan Program Keagamaan & Sholat Dhuha",
-        tanggal: new Date(Date.now() + 172800000).toISOString(),
-        lokasi: "Masjid Sekolah",
-        agenda: "Penyusunan jadwal piket ibadah dan kajian bulanan",
-        dibuat_oleh: "20101",
-        status: "Terjadwal",
-        created_at: new Date().toISOString(),
-        qr_code: "QR-SEKBID1-2026",
-      },
-      {
-        rapat_id: 103,
-        periode_id: 1,
-        division_id: 9,
-        judul: "Rapat Teknis Tim Dokumentasi & Website OSIS",
-        tanggal: new Date(Date.now() + 259200000).toISOString(),
-        lokasi: "Lab Komputer 2",
-        agenda: "Pengembangan web Canopy dan siaran mading digital",
-        dibuat_oleh: "20109",
-        status: "Terjadwal",
-        created_at: new Date().toISOString(),
-        qr_code: "QR-SEKBID9-2026",
-      },
-    ];
-    if (typeof window !== "undefined") {
-      localStorage.setItem("canopy_local_meetings", JSON.stringify(defaultMeetings));
-    }
-    return { rapat: defaultMeetings };
+  ) => request<RapatDetail>(`/rapat/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+
+  deleteMeeting: (id: number) => request<{ message: string }>(`/rapat/${id}`, { method: "DELETE" }),
+
+  /* legacy block removed */
+  listMeetingsLegacy: async (): Promise<{ rapat: RapatDetail[] }> => {
+    return { rapat: [] };
   },
 
-  createMeeting: async (data: {
+  createMeetingLegacy: async (data: {
     division_id?: number;
     judul: string;
     tanggal: string;
     lokasi: string;
     agenda: string;
   }): Promise<RapatDetail> => {
-    let result: RapatDetail | null = null;
-    try {
-      result = await request<RapatDetail>("/rapat", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    } catch (e) {
-      console.warn("Backend unavailable, storing meeting locally:", e);
-    }
-
-    if (!result || !result.rapat_id) {
-      const currentUser = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("canopy_user") || "{}") : {};
-      result = {
-        rapat_id: Date.now(),
-        periode_id: 1,
-        division_id: data.division_id || null,
-        judul: data.judul,
-        tanggal: data.tanggal,
-        lokasi: data.lokasi || "Belum ditentukan",
-        agenda: data.agenda || "",
-        dibuat_oleh: currentUser?.nis || "20011",
-        status: "Terjadwal",
-        created_at: new Date().toISOString(),
-        qr_code: "QR-" + Math.random().toString(36).substring(2, 8).toUpperCase(),
-      };
-    }
-
-    if (typeof window !== "undefined") {
-      const local = localStorage.getItem("canopy_local_meetings");
-      let list: RapatDetail[] = [];
-      if (local) {
-        try { list = JSON.parse(local); } catch {}
-      }
-      localStorage.setItem("canopy_local_meetings", JSON.stringify([result, ...list]));
-
-      // Tambahkan ke pengumuman lokal juga
-      const localAnn = localStorage.getItem("canopy_local_announcements");
-      let annList: PengumumanDetail[] = [];
-      if (localAnn) {
-        try { annList = JSON.parse(localAnn); } catch {}
-      }
-      annList.unshift({
-        pengumuman_id: Date.now(),
-        judul: `📅 Jadwal Rapat Baru: ${data.judul}`,
-        isi: `Rapat '${data.judul}' telah dijadwalkan pada ${new Date(data.tanggal).toLocaleString("id-ID")} di ${data.lokasi || "Belum ditentukan"}. Agenda: ${data.agenda}`,
-        dibuat_oleh: result.dibuat_oleh,
-        target: data.division_id ? "Divisi" : "Organisasi",
-        division_id: data.division_id || null,
-        tanggal: new Date().toISOString(),
-      });
-      localStorage.setItem("canopy_local_announcements", JSON.stringify(annList));
-    }
+    const result = await request<RapatDetail>("/rapat", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
 
     return result;
   },
 
-  getMeeting: (id: number) =>
+  getMeetingLegacy: (id: number) =>
     request<RapatDetail>(`/rapat/${id}`),
 
-  updateMeeting: async (
+  updateMeetingLegacy: async (
     id: number,
     data: {
       judul?: string;
@@ -797,7 +731,7 @@ export const api = {
     throw new Error("Rapat tidak ditemukan");
   },
 
-  deleteMeeting: async (id: number): Promise<{ message: string }> => {
+  deleteMeetingLegacy: async (id: number): Promise<{ message: string }> => {
     try {
       await request<{ message: string }>(`/rapat/${id}`, {
         method: "DELETE",
@@ -1037,102 +971,32 @@ export const api = {
     }),
 
   // Special Division Modules
-  getB1Events: () => request<{ events: any[] }>("/special/b1"),
-  createB1Event: (data: any) => request<any>("/special/b1", { method: "POST", body: JSON.stringify(data) }),
+  getB1Events: () => request<{ events: B1Event[] }>("/special/b1"),
+  createB1Event: (data: Omit<B1Event, "id">) => request<B1Event>("/special/b1", { method: "POST", body: JSON.stringify(data) }),
+  getB2Records: () => request<{ records: B2Record[] }>("/special/b2"),
+  createB2Record: (data: Omit<B2Record, "id">) => request<B2Record>("/special/b2", { method: "POST", body: JSON.stringify(data) }),
+  getB3Rosters: () => request<{ rosters: B3Roster[] }>("/special/b3"),
+  createB3Roster: (data: Omit<B3Roster, "id">) => request<B3Roster>("/special/b3", { method: "POST", body: JSON.stringify(data) }),
+  getB4Competitions: () => request<{ competitions: B4Competition[] }>("/special/b4"),
+  createB4Competition: (data: Omit<B4Competition, "id">) => request<B4Competition>("/special/b4", { method: "POST", body: JSON.stringify(data) }),
+  getB5Surveys: () => request<{ surveys: B5Survey[] }>("/special/b5"),
+  createB5Survey: (data: Omit<B5Survey, "id" | "yes_votes" | "no_votes">) => request<B5Survey>("/special/b5", { method: "POST", body: JSON.stringify(data) }),
+  voteB5Survey: (id: number, vote: string) => request<{ message: string }>(`/special/b5/${id}/vote`, { method: "POST", body: JSON.stringify({ vote }) }),
+  getB6Sales: () => request<{ sales: B6Sale[] }>("/special/b6"),
+  createB6Sale: (data: Omit<B6Sale, "id">) => request<B6Sale>("/special/b6", { method: "POST", body: JSON.stringify(data) }),
+  getB7Visits: () => request<{ visits: B7Visit[] }>("/special/b7"),
+  createB7Visit: (data: Omit<B7Visit, "id" | "visit_date">) => request<B7Visit>("/special/b7", { method: "POST", body: JSON.stringify(data) }),
+  getB8Mading: () => request<{ mading: B8Mading[] }>("/special/b8"),
+  createB8Mading: (data: Omit<B8Mading, "id" | "created_at">) => request<B8Mading>("/special/b8", { method: "POST", body: JSON.stringify(data) }),
+  getB9Links: () => request<{ links: B9Link[] }>("/special/b9"),
+  createB9Link: (data: Omit<B9Link, "id">) => request<B9Link>("/special/b9", { method: "POST", body: JSON.stringify(data) }),
+  getB10Words: () => request<{ words: B10Word[] }>("/special/b10"),
+  createB10Word: (data: Omit<B10Word, "id">) => request<B10Word>("/special/b10", { method: "POST", body: JSON.stringify(data) }),
 
-  getB2Records: () => request<{ records: any[] }>("/special/b2"),
-  createB2Record: (data: any) => request<any>("/special/b2", { method: "POST", body: JSON.stringify(data) }),
+  listNotifications: () => request<{ notifikasi: { notifikasi_id: number; kategori: string; judul: string; pesan: string; link_ref: string; status: string; dibuat_at: string }[] }>("/notifications"),
+  markNotificationRead: (id: number) => request<{ message: string }>(`/notifications/${id}/read`, { method: "POST" }),
 
-  getB3Rosters: () => request<{ rosters: any[] }>("/special/b3"),
-  createB3Roster: (data: any) => request<any>("/special/b3", { method: "POST", body: JSON.stringify(data) }),
-
-  getB4Competitions: () => request<{ competitions: any[] }>("/special/b4"),
-  createB4Competition: (data: any) => request<any>("/special/b4", { method: "POST", body: JSON.stringify(data) }),
-
-  getB5Surveys: () => request<{ surveys: any[] }>("/special/b5"),
-  createB5Survey: (data: any) => request<any>("/special/b5", { method: "POST", body: JSON.stringify(data) }),
-  voteB5Survey: (id: number, vote: string) => request<any>(`/special/b5/${id}/vote`, { method: "POST", body: JSON.stringify({ vote }) }),
-
-  getB6Sales: () => request<{ sales: any[] }>("/special/b6"),
-  createB6Sale: (data: any) => request<any>("/special/b6", { method: "POST", body: JSON.stringify(data) }),
-
-  getB7Visits: () => request<{ visits: any[] }>("/special/b7"),
-  createB7Visit: (data: any) => request<any>("/special/b7", { method: "POST", body: JSON.stringify(data) }),
-
-  getB8Mading: () => request<{ mading: any[] }>("/special/b8"),
-  createB8Mading: (data: any) => request<any>("/special/b8", { method: "POST", body: JSON.stringify(data) }),
-
-  getB9Links: () => request<{ links: any[] }>("/special/b9"),
-  createB9Link: (data: any) => request<any>("/special/b9", { method: "POST", body: JSON.stringify(data) }),
-
-  getB10Words: () => request<{ words: any[] }>("/special/b10"),
-  createB10Word: (data: any) => request<any>("/special/b10", { method: "POST", body: JSON.stringify(data) }),
-
-  // Announcements with resilient storage fallback
-  getAnnouncements: async (): Promise<{ pengumuman: PengumumanDetail[] }> => {
-    try {
-      const res = await request<{ pengumuman: PengumumanDetail[] }>("/pengumuman");
-      if (res && Array.isArray(res.pengumuman)) {
-        return res;
-      }
-    } catch (e) {
-      console.warn("Backend unavailable, loading local announcements:", e);
-    }
-    if (typeof window !== "undefined") {
-      const local = localStorage.getItem("canopy_local_announcements");
-      if (local) {
-        try {
-          return { pengumuman: JSON.parse(local) };
-        } catch {}
-      }
-    }
-    const defaultAnnouncements: PengumumanDetail[] = [
-      {
-        pengumuman_id: 1,
-        judul: "📢 Selamat Datang di Canopy OSIS",
-        isi: "Platform resmi manajemen organisasi OSIS. Seluruh jadwal rapat, tugas, proker, dan keuangan terintegrasi di sini.",
-        dibuat_oleh: "10001",
-        target: "Organisasi",
-        division_id: null,
-        tanggal: new Date().toISOString(),
-      },
-    ];
-    return { pengumuman: defaultAnnouncements };
-  },
-
-  createAnnouncement: async (data: { judul: string; isi: string; target: string; division_id?: number }): Promise<PengumumanDetail> => {
-    let result: PengumumanDetail | null = null;
-    try {
-      result = await request<PengumumanDetail>("/pengumuman", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
-    } catch (e) {
-      console.warn("Backend unavailable, storing announcement locally:", e);
-    }
-
-    if (!result || !result.pengumuman_id) {
-      const currentUser = typeof window !== "undefined" ? JSON.parse(localStorage.getItem("canopy_user") || "{}") : {};
-      result = {
-        pengumuman_id: Date.now(),
-        judul: data.judul,
-        isi: data.isi,
-        dibuat_oleh: currentUser?.nis || "20011",
-        target: data.target,
-        division_id: data.division_id || null,
-        tanggal: new Date().toISOString(),
-      };
-    }
-
-    if (typeof window !== "undefined") {
-      const local = localStorage.getItem("canopy_local_announcements");
-      let list: PengumumanDetail[] = [];
-      if (local) {
-        try { list = JSON.parse(local); } catch {}
-      }
-      localStorage.setItem("canopy_local_announcements", JSON.stringify([result, ...list]));
-    }
-
-    return result;
-  },
+  // Announcements
+  getAnnouncements: () => request<{ pengumuman: PengumumanDetail[] }>("/pengumuman"),
+  createAnnouncement: (data: { judul: string; isi: string; target: string; division_id?: number }) => request<PengumumanDetail>("/pengumuman", { method: "POST", body: JSON.stringify(data) }),
 };

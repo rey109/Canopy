@@ -120,7 +120,9 @@ export default function HandoverPage() {
     }).format(val);
   };
 
-  const canCreate = user?.group_name === "Trimitra" || user?.group_name === "Pembina";
+  const canCreate = user?.group_name === "Trimitra";
+  const canSign = user?.group_name === "Trimitra" || user?.group_name === "Pembina";
+  const isReadOnly = user?.group_name === "Pembina";
 
   return (
     <div className="animate-fade-in">
@@ -128,7 +130,7 @@ export default function HandoverPage() {
         <div>
           <h1 className="text-2xl font-bold">Handover & Serah Terima</h1>
           <p className="text-[var(--text-secondary)] text-sm mt-1">
-            Arsip berita acara serah terima jabatan pengurus lintas periode
+             {isReadOnly ? "Pemantauan arsip serah terima lintas periode." : "Kelola checklist dan proses serah terima kepengurusan lintas periode."}
           </p>
         </div>
         {canCreate && (
@@ -199,7 +201,7 @@ export default function HandoverPage() {
                 </div>
               </div>
 
-              {user?.group_name !== "Staf" && (
+              {canSign && (
                 <div className="flex justify-end gap-2 mt-6">
                   <button onClick={() => setSigningItem(h)} className="btn-primary text-xs">
                     Tanda Tangani

@@ -167,7 +167,7 @@ export default function ProkerDetailPage({ params }: PageProps) {
 
   const isPembina = user?.group_name === "Pembina";
   const isKetuaBidang = user?.group_name === "Kepala Divisi";
-  const canManageTask = isKetuaBidang && user?.division_id === proker.division_id;
+  const canManageTask = (isKetuaBidang && user?.division_id === proker.division_id) || user?.group_name === "Trimitra";
 
   // Hitung pemakaian budget proker
   const totalTerpakai = transactions.filter(t => t.status === "Disetujui" && t.jenis === "Keluar").reduce((sum, t) => sum + t.nominal, 0);
@@ -301,7 +301,7 @@ export default function ProkerDetailPage({ params }: PageProps) {
             {tasks.length === 0 ? (
               <p className="text-xs text-[var(--text-muted)] text-center py-12">Belum ada tugas dibuat.</p>
             ) : (
-              <div className="space-y-3Staf">
+              <div className="space-y-3">
                 {tasks.map(t => (
                   <div key={t.task_id} className="p-3 bg-[var(--bg-primary)] rounded border border-[var(--border)] flex justify-between items-center gap-3">
                     <div>

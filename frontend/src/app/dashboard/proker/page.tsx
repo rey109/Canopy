@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { api } from "@/lib/api";
+import { canCreateProker, canMutate, getRoleGroup } from "@/lib/role-access";
 
 // TypeScript Interfaces for Trimitra Proker Management
 export interface Milestone {
@@ -63,30 +65,34 @@ export default function ProkerPage() {
   const [feedbackInput, setFeedbackInput] = useState<string>("");
   const [swalToast, setSwalToast] = useState<{ title: string; message: string; type?: "success" | "delete" } | null>(null);
 
-  // Load proker data strictly from localStorage on mount
-  useEffect(() => {
+  const loadProkers = async () => {
     try {
-      const saved = localStorage.getItem("canopy_proker_data");
-      if (saved !== null) {
-        setProkerList(JSON.parse(saved));
-      } else {
-        setProkerList([]);
-        localStorage.setItem("canopy_proker_data", JSON.stringify([]));
-      }
-    } catch (e) {
-      console.error("Failed to load proker data", e);
+      const response = await api.listProkers();
+      setProkerList(response.prokers.map((proker) => ({
+        id: proker.proker_id,
+        nama: proker.nama,
+        divisiId: proker.division_id || 0,
+        divisiName: proker.division_id ? `Sekbid ${proker.division_id}` : "Organisasi",
+        ketuaDivisi: proker.penanggung_jawab || "Belum ditentukan",
+        status: proker.status === "Belum Mulai" ? "Belum Dimulai" : proker.status as ProkerData["status"],
+        progress: 0,
+        lpjStatus: "Belum Mengajukan",
+        anggaran: proker.anggaran_disetujui,
+        tanggalMulai: proker.tanggal_mulai,
+        tanggalSelesai: proker.tanggal_selesai,
+        deskripsi: proker.deskripsi,
+        milestones: [],
+        catatanPembinaan: [],
+      })));
+    } catch {
       setProkerList([]);
     }
-  }, []);
+  };
 
-  // Save helper to persist proker data
+  useEffect(() => { void loadProkers(); }, [user]);
+
   const saveProkerList = (newList: ProkerData[]) => {
     setProkerList(newList);
-    try {
-      localStorage.setItem("canopy_proker_data", JSON.stringify(newList));
-    } catch (e) {
-      console.error("Failed to save proker data to localStorage", e);
-    }
   };
 
   // Toast alert trigger (SweetAlert style)
@@ -128,8 +134,15 @@ export default function ProkerPage() {
       catatanPembinaan: [],
     };
 
-    const updatedList = [created, ...prokerList];
-    saveProkerList(updatedList);
+    void api.createProker({
+      nama: created.nama,
+      deskripsi: created.deskripsi,
+      division_id: created.divisiId || undefined,
+      anggaran_disetujui: created.anggaran,
+      penanggung_jawab: created.ketuaDivisi,
+      tanggal_mulai: created.tanggalMulai,
+      tanggal_selesai: created.tanggalSelesai,
+    }).then(() => loadProkers()).catch((error: unknown) => alert(error instanceof Error ? error.message : "Gagal membuat program kerja."));
     setIsAddModalOpen(false);
 
     // Reset Form
@@ -143,8 +156,7 @@ export default function ProkerPage() {
 
   // Handler to Delete Proker
   const handleDeleteProker = (id: number) => {
-    const updatedList = prokerList.filter((p) => p.id !== id);
-    saveProkerList(updatedList);
+    void api.updateProkerStatus(id, "Dibatalkan").then(() => loadProkers()).catch((error: unknown) => alert(error instanceof Error ? error.message : "Gagal membatalkan program kerja."));
     setSelectedProker(null);
     setProkerToDelete(null);
     showSwalAlert("Berhasil Dihapus!", "Program kerja telah dihapus dari sistem.", "delete");
@@ -184,12 +196,15 @@ export default function ProkerPage() {
     showSwalAlert("Catatan Pembinaan Terkirim!", "Feedback dan arahan khusus telah berhasil disampaikan kepada Ketua Divisi.", "success");
   };
 
-  const groupName = (user?.group_name || "").toLowerCase();
-  const canManageProker = groupName === "trimitra" || groupName === "sekretaris";
-  const canProvideCoaching = groupName === "trimitra" || groupName === "pembina";
+  const roleGroup = getRoleGroup(user);
+  const canManageProker = canCreateProker(user);
+  const canProvideCoaching = roleGroup === "Trimitra" || roleGroup === "Pembina";
+  const isReadOnly = !canMutate(user);
 
   // Filtered List Logic
   const filteredProkers = prokerList.filter((p) => {
+    const withinScope = user?.scope_divisi_awal == null || p.divisiId >= (user.scope_divisi_awal || 0) && p.divisiId <= (user.scope_divisi_akhir || 0);
+    const involved = roleGroup === "Staf" ? p.milestones.some((milestone) => milestone.name.toLowerCase().includes((user?.nama || "").toLowerCase())) : true;
     const matchDivisi =
       selectedDivisi === "All" ||
       p.divisiName.toLowerCase().includes(selectedDivisi.toLowerCase()) ||
@@ -203,7 +218,7 @@ export default function ProkerPage() {
       p.divisiName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       p.ketuaDivisi.toLowerCase().includes(searchQuery.toLowerCase());
 
-    return matchDivisi && matchStatus && matchSearch;
+    return withinScope && involved && matchDivisi && matchStatus && matchSearch;
   });
 
   const formatCurrency = (val: number) => {
@@ -226,14 +241,14 @@ export default function ProkerPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-6">
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold tracking-wider text-blue-400 uppercase">
-            <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
-            Scope Seluruh Divisi (1–10) • Role: Ketua Trimitra
+             <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+             Scope {user?.scope_divisi_awal == null ? "Organisasi penuh" : `Divisi ${user?.division_id || user?.scope_divisi_awal}`} • Role: {user?.role_name || roleGroup}
           </div>
           <h1 className="text-2xl md:text-3xl font-bold mt-1 text-slate-50">
             Monitoring Program Kerja Organisasi
           </h1>
           <p className="text-slate-400 text-sm mt-0.5 max-w-2xl">
-            Pantau progres proker antar-divisi, milestone, pengajuan LPJ, serta berikan arahan & pembinaan langsung kepada Ketua Divisi.
+             {isReadOnly ? "Lihat ringkasan program kerja yang relevan dengan keterlibatanmu." : "Kelola progres program kerja, task, anggaran, dan dokumen sesuai scope jabatanmu."}
           </p>
         </div>
 

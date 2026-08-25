@@ -73,9 +73,9 @@ export default function ProfilePage() {
     <div className="animate-fade-in space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Profil Anggota</h1>
-        <p className="text-[var(--text-secondary)] text-sm mt-1">
-          Histori kepengurusan dan rekap kontribusi Anda di organisasi
-        </p>
+          <p className="text-[var(--text-secondary)] text-sm mt-1">
+           Histori kepengurusan dan rekap kontribusi Anda sebagai {user?.role_name || "anggota organisasi"}
+         </p>
       </div>
 
       {/* Profil Header */}
@@ -90,9 +90,9 @@ export default function ProfilePage() {
           </div>
           <p className="text-sm text-[var(--text-secondary)]">NIS: {user.nis} • Angkatan: {user.tahun_masuk}</p>
           <p className="text-xs text-[var(--text-muted)]">Jurusan: {user.jurusan}</p>
-          {user.division_id && (
-            <span className="badge badge-neutral text-[10px] mt-1">Seksi Bidang {user.division_id}</span>
-          )}
+           <span className="badge badge-neutral text-[10px] mt-1">
+             {user.scope_divisi_awal == null ? "Scope organisasi penuh" : `Scope Sekbid ${user.scope_divisi_awal}–${user.scope_divisi_akhir}`}
+           </span>
         </div>
       </div>
 

@@ -43,8 +43,8 @@ export default function DashboardLayout({
         {/* Mobile Top Bar */}
         <TopBar />
 
-        <main className="flex-1 overflow-auto pb-20 md:pb-0">
-          <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">{children}</div>
+        <main className="flex-1 overflow-auto pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0">
+          <div className="mx-auto min-h-full max-w-7xl px-4 py-5 sm:px-5 md:p-6 lg:p-8">{children}</div>
         </main>
       </div>
 

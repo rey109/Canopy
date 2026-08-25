@@ -459,6 +459,10 @@ export default function MeetingsPage() {
   };
 
   const isStaf = user?.group_name === "Staf";
+  const isReadOnly = user?.group_name === "Pembina" || isStaf;
+  const canCreateMeeting = !isStaf && user?.group_name !== "Pembina";
+  const canFinalizeNotes = user?.group_name === "Sekretaris" || user?.group_name === "Trimitra";
+  const canManageAttendance = user?.group_name === "Sekretaris" || user?.group_name === "Kepala Divisi";
 
   const filteredMeetings = meetings.filter((m) => {
     if (filterStatus !== "Semua" && m.status !== filterStatus) return false;
@@ -485,7 +489,7 @@ export default function MeetingsPage() {
             Manajemen agenda rapat, jadwal kegiatan, absensi QR, dan notulensi organisasi.
           </p>
         </div>
-        {!isStaf && (
+        {canCreateMeeting && (
           <button onClick={() => setShowModal(true)} className="btn-primary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" />
@@ -631,12 +635,12 @@ export default function MeetingsPage() {
                         </button>
                       </>
                     )}
-                    <button onClick={() => handleOpenAttendance(m)} className="btn-secondary text-xs py-1.5 px-2.5">
-                      Absensi
-                    </button>
-                    <button onClick={() => handleOpenNotulensi(m)} className="btn-primary text-xs py-1.5 px-2.5">
-                      Notulensi
-                    </button>
+                     {canManageAttendance && <button onClick={() => handleOpenAttendance(m)} className="btn-secondary text-xs py-1.5 px-2.5">
+                       Absensi
+                     </button>}
+                     {(canFinalizeNotes || user?.group_name !== "Staf") && <button onClick={() => handleOpenNotulensi(m)} className="btn-primary text-xs py-1.5 px-2.5">
+                       Notulensi
+                     </button>}
                   </div>
                 </div>
               </div>
@@ -771,7 +775,7 @@ export default function MeetingsPage() {
                         >
                           {att.name}
                         </a>
-                        {notulensiStatus !== "Final" && !isStaf && (
+                        {notulensiStatus !== "Final" && canFinalizeNotes && (
                           <button
                             onClick={() => handleRemoveAttachment(idx)}
                             className="text-[10px] text-red-400 hover:text-red-300 px-1.5 py-1 rounded border border-red-500/30 hover:bg-red-500/10 transition-all flex-shrink-0"

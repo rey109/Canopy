@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/lib/auth-context";
+import { api } from "@/lib/api";
 
 // ==========================================
 // 1. DATA STRUCTURE & TYPES
@@ -40,35 +41,30 @@ export default function SchedulePage() {
     }, 1200);
   };
 
-  // Load agendas strictly from localStorage on mount
+  const loadAgendas = async () => {
+    const result = await api.listMeetings();
+    setAgendas(result.rapat.map((meeting) => ({
+      id: meeting.rapat_id,
+      title: meeting.judul,
+      startDate: meeting.tanggal.slice(0, 10),
+      startTime: meeting.tanggal.slice(11, 16),
+      endTime: meeting.tanggal.slice(11, 16),
+      location: meeting.lokasi,
+      isOnline: false,
+      description: meeting.agenda,
+      targetAudience: meeting.division_id ? `Sekbid ${meeting.division_id}` : "Organisasi",
+      createdBy: meeting.dibuat_oleh,
+    })));
+  };
+
   useEffect(() => {
     setMounted(true);
-    try {
-      const saved = localStorage.getItem("canopy_schedule_agendas");
-      if (saved !== null) {
-        const parsed: Agenda[] = JSON.parse(saved);
-        setAgendas(parsed);
-      } else {
-        setAgendas([]);
-      }
+    void loadAgendas();
+    if (new URLSearchParams(window.location.search).get("action") === "add") setIsAddModalOpen(true);
+  }, [user]);
 
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get("action") === "add") {
-        setIsAddModalOpen(true);
-      }
-    } catch (e) {
-      console.error("Failed to load agendas from localStorage", e);
-    }
-  }, []);
-
-  // Save agendas helper (persists to localStorage & state)
   const saveAgendas = (newList: Agenda[]) => {
     setAgendas(newList);
-    try {
-      localStorage.setItem("canopy_schedule_agendas", JSON.stringify(newList));
-    } catch (e) {
-      console.error("Failed to save agendas to localStorage", e);
-    }
   };
   
   // Date navigation states (Default: August 2026)
@@ -129,8 +125,7 @@ export default function SchedulePage() {
       createdBy: `${user?.nama || "Pimpinan"} (${user?.group_name || "OSIS"})`,
     };
 
-    const updated = [created, ...agendas];
-    saveAgendas(updated);
+    void api.createMeeting({ judul: created.title, tanggal: `${created.startDate}T${created.startTime}:00`, lokasi: created.location, agenda: created.description }).then(() => loadAgendas()).catch((error: unknown) => alert(error instanceof Error ? error.message : "Gagal menyimpan agenda."));
     setIsAddModalOpen(false);
     showSwalAlert("Berhasil Disimpan!", "Agenda baru telah berhasil ditambahkan ke kalender.", "success");
 
@@ -141,8 +136,7 @@ export default function SchedulePage() {
   };
 
   const handleDeleteAgenda = (id: number | string) => {
-    const updated = agendas.filter((a) => a.id !== id);
-    saveAgendas(updated);
+    void api.deleteMeeting(Number(id)).then(() => loadAgendas()).catch((error: unknown) => alert(error instanceof Error ? error.message : "Gagal menghapus agenda."));
     setSelectedAgenda(null);
     setAgendaToDelete(null);
     showSwalAlert("Berhasil Dihapus!", "Agenda telah dihapus dari kalender.", "delete");

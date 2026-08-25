@@ -6,6 +6,8 @@ import { createPortal } from "react-dom";
 import { api, type TransaksiDetail, type RapatDetail } from "@/lib/api";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import RoleContextCard from "@/components/role-context-card";
+import { getRoleGroup } from "@/lib/role-access";
 
 interface Stats {
   prokerCount: number;
@@ -96,15 +98,20 @@ export default function DashboardPage() {
     }, 1200);
   };
 
-  // Load Agendas from localStorage
-  const loadAgendas = () => {
+  const loadAgendas = async () => {
     try {
-      const saved = localStorage.getItem("canopy_schedule_agendas");
-      if (saved !== null) {
-        setAgendas(JSON.parse(saved));
-      } else {
-        setAgendas([]);
-      }
+      const response = await api.listMeetings();
+      setAgendas(response.rapat.map((meeting) => ({
+        id: meeting.rapat_id,
+        title: meeting.judul,
+        startDate: meeting.tanggal.slice(0, 10),
+        startTime: meeting.tanggal.slice(11, 16),
+        endTime: meeting.tanggal.slice(11, 16),
+        location: meeting.lokasi,
+        isOnline: false,
+        description: meeting.agenda,
+        createdBy: meeting.dibuat_oleh,
+      })));
     } catch {
       setAgendas([]);
     }
@@ -134,22 +141,7 @@ export default function DashboardPage() {
         setMeetingList(meetings.value.rapat || []);
       }
 
-      // Calculate REAL proker count from localStorage (defaults strictly to 0 if empty)
-      const localProkersCount = (() => {
-        try {
-          const saved = localStorage.getItem("canopy_proker_data");
-          if (saved !== null) {
-            const parsed = JSON.parse(saved);
-            return Array.isArray(parsed) ? parsed.length : 0;
-          }
-          return 0;
-        } catch {
-          return 0;
-        }
-      })();
-
-      const apiProkerCount = prokers.status === "fulfilled" && Array.isArray(prokers.value.prokers) ? prokers.value.prokers.length : 0;
-      const actualProkerCount = Math.max(apiProkerCount, localProkersCount);
+       const actualProkerCount = prokers.status === "fulfilled" && Array.isArray(prokers.value.prokers) ? prokers.value.prokers.length : 0;
 
       setStats({
         prokerCount: actualProkerCount,
@@ -167,7 +159,7 @@ export default function DashboardPage() {
   useEffect(() => {
     setMounted(true);
     fetchDashboardData();
-    loadAgendas();
+    void loadAgendas();
   }, [user]);
 
   const handleApprovalAction = async (
@@ -204,9 +196,7 @@ export default function DashboardPage() {
     if (!agendaToDelete) return;
     const updated = agendas.filter((a) => a.id !== agendaToDelete.id);
     setAgendas(updated);
-    try {
-      localStorage.setItem("canopy_schedule_agendas", JSON.stringify(updated));
-    } catch {}
+    void api.deleteMeeting(Number(agendaToDelete.id)).catch(() => {});
 
     setAgendaToDelete(null);
     showSwalToast("Berhasil Dihapus!", "Agenda telah berhasil dihapus.", "delete");
@@ -221,10 +211,26 @@ export default function DashboardPage() {
   };
 
   const selectedAgendas = agendas.filter((a) => a.startDate === currentSelectedDateStr);
+  const roleGroup = getRoleGroup(user);
+  const showFinanceCard = roleGroup === "Bendahara" || roleGroup === "Trimitra";
+  const showApprovalCard = roleGroup === "Sekretaris" || roleGroup === "Bendahara" || roleGroup === "Trimitra";
+  const roleSummary = roleGroup === "Staf"
+    ? "Tugas personal, jadwal rapat, dan pengumuman divisi."
+    : roleGroup === "Kepala Divisi"
+      ? "Progres divisi, task anggota, dan kehadiran Sekbid."
+      : roleGroup === "Sekretaris"
+        ? "Dokumen, notulensi, presensi, dan aset sesuai scope."
+        : roleGroup === "Bendahara"
+          ? "Saldo, transaksi, verifikasi nota, dan approval berisiko."
+          : roleGroup === "Pembina"
+            ? "Pemantauan organisasi dan catatan pembinaan."
+            : "Approval pusat, struktur, dan ringkasan seluruh organisasi.";
 
   return (
     <div className="animate-fade-in space-y-6 pb-12 text-slate-100 font-sans">
       
+      <RoleContextCard />
+
       {/* TOP BREADCRUMB & HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-5">
         <div>
@@ -240,6 +246,11 @@ export default function DashboardPage() {
             Selamat datang kembali, <span className="text-blue-400 font-semibold">{user?.nama || "Pengurus OSIS"}</span> ({user?.role_name || user?.group_name || "Anggota"})
           </p>
         </div>
+      </div>
+
+      <div className="glass-card border border-slate-700/70 p-5">
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Prioritas role hari ini</p>
+        <p className="mt-2 text-sm text-slate-200">{roleSummary}</p>
       </div>
 
       {/* EXECUTIVE SUMMARY GRID (4 KPI CARDS ROW) */}
@@ -278,7 +289,7 @@ export default function DashboardPage() {
           </Link>
 
           {/* Stat Card 2: Pending Approval */}
-          <button
+          {showApprovalCard && <button
             onClick={() => {
               const el = document.getElementById("approval-section");
               if (el) el.scrollIntoView({ behavior: "smooth" });
@@ -303,11 +314,11 @@ export default function DashboardPage() {
               </div>
               <p className="text-[11px] text-slate-400 mt-1">Proposals &amp; Letters</p>
             </div>
-          </button>
+          </button>}
 
-          {/* Stat Card 3: Saldo Kas (Rp 0) */}
-          <Link
-            href="/dashboard/finance"
+           {/* Stat Card 3: Saldo Kas (Rp 0) */}
+           {showFinanceCard ? <Link
+             href="/dashboard/finance"
             className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-emerald-500/60 rounded-2xl p-5 shadow-lg hover:shadow-emerald-500/5 transition-all group flex flex-col justify-between space-y-4"
           >
             <div className="flex items-center justify-between">
@@ -327,9 +338,13 @@ export default function DashboardPage() {
               </div>
               <p className="text-[11px] text-slate-400 mt-1">Belum Ada Kas Masuk</p>
             </div>
-          </Link>
+           </Link> : <div className="bg-[#1e293b]/90 border border-slate-700/60 rounded-2xl p-5 shadow-lg">
+             <p className="text-xs font-bold uppercase tracking-wider text-slate-400">KEHADIRAN PRIBADI</p>
+             <p className="mt-3 text-2xl font-extrabold text-emerald-400">—</p>
+             <p className="mt-1 text-[11px] text-slate-400">Rekap presensi periode aktif</p>
+           </div>}
 
-          {/* Stat Card 4: Total Rapat */}
+           {/* Stat Card 4: Total Rapat */}
           <Link
             href="/dashboard/meetings"
             className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-rose-500/60 rounded-2xl p-5 shadow-lg hover:shadow-rose-500/5 transition-all group flex flex-col justify-between space-y-4"

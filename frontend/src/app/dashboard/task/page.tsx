@@ -3,9 +3,12 @@
 import { useEffect, useState } from "react";
 import { api, type TaskDetail, type UserDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { getRoleGroup, canMutate } from "@/lib/role-access";
 
 export default function TaskPage() {
   const { user } = useAuth();
+  const roleGroup = getRoleGroup(user);
+  const readOnly = !canMutate(user);
   const [tasks, setTasks] = useState<TaskDetail[]>([]);
   const [userList, setUserList] = useState<UserDetail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,9 +89,9 @@ export default function TaskPage() {
       return t.assigned_to === user.nis;
     }
     if (activeFilter === "tersedia") {
-      return t.status === "Tersedia" || t.status === "Ditawarkan";
+      return roleGroup !== "Pembina" && (t.status === "Tersedia" || t.status === "Ditawarkan");
     }
-    return true;
+    return roleGroup !== "Staf" && roleGroup !== "Pembina";
   });
 
   return (
@@ -96,7 +99,7 @@ export default function TaskPage() {
       <div>
         <h1 className="text-2xl font-bold">Daftar Tugas (Tasks)</h1>
         <p className="text-[var(--text-secondary)] text-sm mt-1">
-          Pantau tugas program kerja Anda, tawarkan, ambil tugas baru, dan laporkan kontribusi.
+          {roleGroup === "Staf" ? "Tugas yang ditugaskan, tersedia untuk diambil, dan kontribusi pribadi." : roleGroup === "Kepala Divisi" ? "Kelola task divisi, assign anggota, dan pantau deadline." : roleGroup === "Pembina" ? "Pantau task organisasi tanpa melakukan perubahan." : "Pantau task pribadi dan task yang relevan dengan scope jabatan."}
         </p>
       </div>
 
@@ -112,7 +115,7 @@ export default function TaskPage() {
         >
           Tugas Saya
         </button>
-        <button
+        {!readOnly && <button
           onClick={() => setActiveFilter("tersedia")}
           className={`px-4 py-2 border-b-2 text-sm font-medium transition-all ${
             activeFilter === "tersedia"
@@ -121,8 +124,8 @@ export default function TaskPage() {
           }`}
         >
           Tugas Tersedia / Ditawarkan
-        </button>
-        <button
+        </button>}
+        {!readOnly && <button
           onClick={() => setActiveFilter("semua")}
           className={`px-4 py-2 border-b-2 text-sm font-medium transition-all ${
             activeFilter === "semua"
@@ -131,7 +134,7 @@ export default function TaskPage() {
           }`}
         >
           Semua Tugas
-        </button>
+        </button>}
       </div>
 
       {loading ? (
@@ -151,9 +154,9 @@ export default function TaskPage() {
         <div className="space-y-3 stagger-children">
           {filteredTasks.map((t) => {
             const isMyTask = t.assigned_to === user?.nis;
-            const canOffer = isMyTask && t.status === "Ditugaskan";
-            const canTake = !isMyTask && (t.status === "Ditawarkan" || t.status === "Tersedia");
-            const canComplete = isMyTask && t.status === "Ditugaskan";
+            const canOffer = !readOnly && isMyTask && t.status === "Ditugaskan";
+            const canTake = !readOnly && !isMyTask && (t.status === "Ditawarkan" || t.status === "Tersedia");
+            const canComplete = !readOnly && isMyTask && t.status === "Ditugaskan";
 
             return (
               <div key={t.task_id} className="glass-card p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:translate-y-[-1px] transition-all">

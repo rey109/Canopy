@@ -3,20 +3,21 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { api, UserDetail, DivisionDetail } from "@/lib/api";
+import { canManageDivision, canViewDivision } from "@/lib/division-access";
 
 export type UIUserDetail = UserDetail & { division_name?: string };
 
 const DEFAULT_DIVISIONS: DivisionDetail[] = [
-  { division_id: 3, division_name: "Seksi Bidang 1 - Keagamaan", deskripsi: "" },
-  { division_id: 4, division_name: "Seksi Bidang 2 - Budi Pekerti", deskripsi: "" },
-  { division_id: 5, division_name: "Seksi Bidang 3 - Bela Negara", deskripsi: "" },
-  { division_id: 6, division_name: "Seksi Bidang 4 - Prestasi/Seni", deskripsi: "" },
-  { division_id: 7, division_name: "Seksi Bidang 5 - Demokrasi", deskripsi: "" },
-  { division_id: 8, division_name: "Seksi Bidang 6 - Kewirausahaan", deskripsi: "" },
-  { division_id: 9, division_name: "Seksi Bidang 7 - Kesehatan/UKS", deskripsi: "" },
-  { division_id: 10, division_name: "Seksi Bidang 8 - Sastra/Budaya", deskripsi: "" },
-  { division_id: 11, division_name: "Seksi Bidang 9 - TIK", deskripsi: "" },
-  { division_id: 12, division_name: "Seksi Bidang 10 - Bahasa Asing", deskripsi: "" },
+  { division_id: 1, division_name: "Seksi Bidang 1 - Keagamaan", deskripsi: "" },
+  { division_id: 2, division_name: "Seksi Bidang 2 - Budi Pekerti", deskripsi: "" },
+  { division_id: 3, division_name: "Seksi Bidang 3 - Bela Negara", deskripsi: "" },
+  { division_id: 4, division_name: "Seksi Bidang 4 - Prestasi/Seni", deskripsi: "" },
+  { division_id: 5, division_name: "Seksi Bidang 5 - Demokrasi", deskripsi: "" },
+  { division_id: 6, division_name: "Seksi Bidang 6 - Kewirausahaan", deskripsi: "" },
+  { division_id: 7, division_name: "Seksi Bidang 7 - Kesehatan/UKS", deskripsi: "" },
+  { division_id: 8, division_name: "Seksi Bidang 8 - Sastra/Budaya", deskripsi: "" },
+  { division_id: 9, division_name: "Seksi Bidang 9 - TIK", deskripsi: "" },
+  { division_id: 10, division_name: "Seksi Bidang 10 - Bahasa Asing", deskripsi: "" },
 ];
 
 const DEFAULT_ROLES = [
@@ -31,18 +32,7 @@ const DEFAULT_ROLES = [
 
 export default function MemberPage() {
   const { user } = useAuth();
-  const [members, setMembers] = useState<UIUserDetail[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("canopy_members_data");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-      } catch (e) {}
-    }
-    return [];
-  });
+  const [members, setMembers] = useState<UIUserDetail[]>([]);
   const [divisionsList, setDivisionsList] = useState<DivisionDetail[]>(DEFAULT_DIVISIONS);
   const [rolesList, setRolesList] = useState<any[]>(DEFAULT_ROLES);
   const [activePeriodeId, setActivePeriodeId] = useState<number | null>(1);
@@ -72,9 +62,8 @@ export default function MemberPage() {
   const gName = (user?.group_name || "").toLowerCase();
   const rName = (user?.role_name || "").toLowerCase();
 
-  const canEditMembers =
-    gName.includes("sekretar") ||
-    rName.includes("sekretar");
+  const canEditMembers = user?.group_name === "Trimitra";
+  const visibleDivisionIds = DEFAULT_DIVISIONS.map((division) => division.division_id).filter((id) => canViewDivision(user, id));
 
   const fetchData = async () => {
     let divs = DEFAULT_DIVISIONS;
@@ -119,25 +108,7 @@ export default function MemberPage() {
       }
     } catch (e) {}
 
-    if (loadedMembers.length === 0) {
-      if (typeof window !== "undefined") {
-        try {
-          const saved = localStorage.getItem("canopy_members_data");
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              setMembers(parsed);
-              return;
-            }
-          }
-        } catch (e) {}
-      }
-    } else {
-      setMembers(loadedMembers);
-      try {
-        localStorage.setItem("canopy_members_data", JSON.stringify(loadedMembers));
-      } catch (e) {}
-    }
+    setMembers(loadedMembers);
   };
 
   useEffect(() => {
@@ -186,13 +157,7 @@ export default function MemberPage() {
       division_name: selDiv ? selDiv.division_name : "Seksi Bidang 1 - Keagamaan"
     };
 
-    setMembers((prev) => {
-      const updated = [createdMember, ...prev.filter((m) => m.nis !== nisToUse)];
-      try {
-        localStorage.setItem("canopy_members_data", JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
+    void api.register({ nis: nisToUse, nama: createdMember.nama, jurusan: createdMember.jurusan, tahun_masuk: createdMember.tahun_masuk, password: nisToUse }).then(() => api.assignMembership({ nis: nisToUse, role_id: selRole.role_id, division_id: createdMember.division_id || undefined, periode_id: activePeriodeId || 1 })).then(() => fetchData()).catch((error: unknown) => alert(error instanceof Error ? error.message : "Gagal menyimpan anggota."));
 
     setIsAddModalOpen(false);
     setNewNis("");
@@ -209,13 +174,7 @@ export default function MemberPage() {
       alert("Hanya Sekretariat yang memiliki akses untuk menghapus anggota.");
       return;
     }
-    setMembers((prev) => {
-      const updated = prev.filter((m) => m.nis !== nis);
-      try {
-        localStorage.setItem("canopy_members_data", JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
+    alert("Penghapusan anggota harus dilakukan melalui endpoint administrasi backend.");
     setMemberToDelete(null);
     showSwalAlert("Berhasil Dihapus!", "Data anggota telah dihapus.", "delete");
   };
@@ -236,6 +195,7 @@ export default function MemberPage() {
   // Filter & Sort Logic
   const filteredMembers = members
     .filter((m) => {
+      const matchScope = m.division_id == null || visibleDivisionIds.includes(m.division_id);
       const matchName =
         searchName === "" ||
         m.nama.toLowerCase().includes(searchName.toLowerCase()) ||
@@ -257,7 +217,7 @@ export default function MemberPage() {
       const matchRole =
         selectedRole === "All" || roleName === selRoleNorm;
 
-      return matchName && matchDivisi && matchAngkatan && matchRole;
+      return matchScope && matchName && matchDivisi && matchAngkatan && matchRole;
     })
     .sort((a, b) => a.nama.localeCompare(b.nama, "id", { sensitivity: "base" }));
 
@@ -266,7 +226,7 @@ export default function MemberPage() {
       {/* 1. TOP HEADER BAR: TITLE & CREATE NEW BUTTON (ONLY VISIBLE TO SEKRETARIAT) */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-slate-50 tracking-tight">
-          Anggota
+          {user?.group_name === "Staf" ? "Anggota Sekbid" : "Anggota Organisasi"}
         </h1>
 
         {canEditMembers && (
@@ -368,7 +328,7 @@ export default function MemberPage() {
         </div>
 
         <p className="text-[11px] text-slate-500 italic pt-1">
-          *Data telah ditampilkan sesuai dengan filter yang Anda pilih
+           *Data telah ditampilkan sesuai dengan filter, scope, dan jabatan aktif Anda
         </p>
       </div>
 

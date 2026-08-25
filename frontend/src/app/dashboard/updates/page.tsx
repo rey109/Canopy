@@ -1,12 +1,12 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
-import { api } from "@/lib/api";
+import { api, type PengumumanDetail } from "@/lib/api";
 import { useState, useEffect } from "react";
 
 export default function UpdatesPage() {
   const { user } = useAuth();
-  const [announcements, setAnnouncements] = useState<any[]>([]);
+  const [announcements, setAnnouncements] = useState<PengumumanDetail[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Form state
@@ -14,10 +14,6 @@ export default function UpdatesPage() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [scope, setScope] = useState("organisasi");
-
-  useEffect(() => {
-    fetchAnnouncements();
-  }, []);
 
   const fetchAnnouncements = async () => {
     try {
@@ -30,10 +26,14 @@ export default function UpdatesPage() {
     }
   };
 
+  useEffect(() => {
+    void fetchAnnouncements();
+  }, [user]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.createAnnouncement({ judul: title, isi: body, target: scope === "organisasi" ? "Organisasi" : "Divisi" });
+      await api.createAnnouncement({ judul: title, isi: body, target: scope === "organisasi" ? "Organisasi" : "Divisi", division_id: scope === "divisi" ? user?.division_id || undefined : undefined });
       setIsComposing(false);
       setTitle("");
       setBody("");
@@ -43,9 +43,10 @@ export default function UpdatesPage() {
     }
   };
 
-  const canCreateOrg = user?.group_name === "Trimitra" || user?.group_name === "Sekretaris" || user?.group_name === "Pembina";
-  const canCreateDiv = user?.group_name === "Kepala Divisi" || user?.group_name === "Trimitra";
+  const canCreateOrg = user?.group_name === "Trimitra" || (user?.group_name === "Sekretaris" && user.level === 1);
+  const canCreateDiv = user?.group_name === "Kepala Divisi" || user?.group_name === "Trimitra" || (user?.group_name === "Sekretaris" && user.level === 2);
   const canCreateAny = canCreateOrg || canCreateDiv;
+  const canModerate = user?.group_name === "Sekretaris" || user?.group_name === "Trimitra";
 
   if (loading) {
     return <div className="p-8 text-center text-[var(--text-muted)] animate-pulse">Loading updates...</div>;
@@ -131,35 +132,35 @@ export default function UpdatesPage() {
           </div>
         ) : (
           announcements.map((item) => (
-            <div key={item.id} className="card p-5 hover:border-[var(--accent)]/30 transition-colors">
+            <div key={item.pengumuman_id} className="card p-5 hover:border-[var(--accent)]/30 transition-colors">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-2 mb-1">
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      item.scope === 'organisasi' 
+                      item.target === 'Organisasi'
                         ? 'bg-[var(--accent)]/10 text-[var(--accent)]' 
                         : 'bg-purple-500/10 text-purple-500'
                     }`}>
-                      {item.scope === 'organisasi' ? 'ORGANISASI' : 'DIVISI'}
+                      {item.target === 'Organisasi' ? 'ORGANISASI' : 'DIVISI'}
                     </span>
                     <span className="text-xs text-[var(--text-muted)]">
-                      {new Date(item.created_at).toLocaleDateString('id-ID', {
+                      {new Date(item.tanggal).toLocaleDateString('id-ID', {
                         day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
                       })}
                     </span>
                   </div>
-                  <h3 className="font-semibold text-base mt-2">{item.title}</h3>
+                  <h3 className="font-semibold text-base mt-2">{item.judul}</h3>
                   <p className="text-sm text-[var(--text-secondary)] mt-2 whitespace-pre-wrap leading-relaxed">
-                    {item.body}
+                    {item.isi}
                   </p>
                 </div>
               </div>
               <div className="mt-4 pt-4 border-t border-[var(--border)] flex items-center gap-2">
                 <div className="w-5 h-5 rounded-full bg-[var(--bg-primary)] flex items-center justify-center text-[10px] font-bold text-[var(--text-muted)]">
-                  {item.created_by.charAt(0)}
+                  {item.dibuat_oleh.charAt(0)}
                 </div>
                 <span className="text-xs text-[var(--text-muted)]">
-                  Oleh: <span className="font-medium text-[var(--text-primary)]">{item.created_by}</span>
+                  Oleh: <span className="font-medium text-[var(--text-primary)]">{item.dibuat_oleh}</span>
                 </span>
               </div>
             </div>
