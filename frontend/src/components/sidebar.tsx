@@ -128,6 +128,12 @@ const iconMap: Record<string, React.ReactNode> = {
       <path d="M21 13v2a4 4 0 01-4 4H3" />
     </svg>
   ),
+  "Dokumentasi": (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.5 4h-5L7 7H4a2 2 0 00-2 2v9a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2h-3l-2.5-3z" />
+      <circle cx="12" cy="13" r="3" />
+    </svg>
+  ),
   "Public Portal": (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -152,16 +158,18 @@ const hrefMap: Record<string, string> = {
   "Profile": "/dashboard/profile",
   "Setting": "/dashboard/settings",
   "Absensi": "/dashboard/attendance",
+  "Dokumentasi": "/dashboard/dokumentasi",
   "Aset": "/dashboard/assets",
   "Handover": "/dashboard/handover",
   "Public Portal": "/dashboard/public",
 };
 
-// Modul Manajemen items — Riwayat Absensi dipisah dari Anggota & disatukan di Manajemen untuk sekretaris/BPH
+// Modul Manajemen items — Anggota, Absensi, Dokumentasi PDD (Sekbid 9) dipisah & disatukan untuk sekretaris/BPH
 const modulManajemen: { label: string; key: string }[] = [
   { label: "Dashboard", key: "Dashboard" },
   { label: "Anggota", key: "Member" },
   { label: "Absensi", key: "Absensi" },
+  { label: "Dokumentasi PDD", key: "Dokumentasi" },
   { label: "Proker", key: "Program Kerja" },
   { label: "Keuangan", key: "Keuangan" },
   { label: "Rapat", key: "Rapat" },

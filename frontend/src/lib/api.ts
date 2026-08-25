@@ -340,6 +340,36 @@ export interface HandoverDetail {
   created_at: string;
 }
 
+export interface DokumentasiPDD {
+  id: number;
+  judul: string;
+  deskripsi: string;
+  kegiatan: string;
+  tanggal_kegiatan: string;
+  lokasi: string;
+  sekbid_asal: number | null;
+  proker_id: number | null;
+  file_url: string | null;
+  file_name: string | null;
+  file_type: string | null;
+  file_size: number | null;
+  drive_url?: string | null;
+  folder_name?: string | null;
+  attachments?: DokumentasiAttachmentPDD[];
+  dibuat_oleh: string;
+  created_at: string;
+}
+
+export interface DokumentasiAttachmentPDD {
+  id: number;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  file_url?: string | null;
+  drive_url?: string | null;
+  created_at: string;
+}
+
 export const api = {
   // Auth
   login: (nis: string, password: string) =>
@@ -1542,6 +1572,203 @@ export const api = {
 
   getB10Words: () => request<{ words: any[] }>("/special/b10"),
   createB10Word: (data: any) => request<any>("/special/b10", { method: "POST", body: JSON.stringify(data) }),
+
+  // Dokumentasi PDD — Sekbid 9 khusus, setiap Sekbid bisa setor
+  listDokumentasi: async (params?: { sekbid_asal?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.sekbid_asal !== undefined) q.set("sekbid_asal", String(params.sekbid_asal));
+    const qs = q.toString();
+    try {
+      const res = await request<{ dokumentasi: DokumentasiPDD[] }>(`/dokumentasi/pdd${qs ? "?" + qs : ""}`);
+      if (res && Array.isArray(res.dokumentasi) && typeof window !== "undefined") {
+        try { localStorage.setItem("canopy_dokumentasi_pdd", JSON.stringify(res.dokumentasi)); } catch {}
+      }
+      return res;
+    } catch (e) {
+      console.warn("Backend dokumentasi failed, fallback localStorage:", e);
+      if (typeof window !== "undefined") {
+        const raw = localStorage.getItem("canopy_dokumentasi_pdd");
+        if (raw) {
+          try {
+            let arr = JSON.parse(raw) as DokumentasiPDD[];
+            if (params?.sekbid_asal !== undefined) {
+              arr = arr.filter((d) => d.sekbid_asal === params.sekbid_asal || (params.sekbid_asal as any) === 0);
+            }
+            return { dokumentasi: arr };
+          } catch {}
+        }
+      }
+      return { dokumentasi: [] };
+    }
+  },
+  getDokumentasi: async (id: number) => {
+    try { return await request<DokumentasiPDD>(`/dokumentasi/pdd/${id}`); } catch (e) {
+      if (typeof window !== "undefined") {
+        const raw = localStorage.getItem("canopy_dokumentasi_pdd");
+        if (raw) { const arr = JSON.parse(raw) as DokumentasiPDD[]; const found = arr.find((d) => d.id === id); if (found) return found; }
+      }
+      throw e;
+    }
+  },
+  createDokumentasi: async (data: { judul: string; deskripsi?: string; kegiatan: string; tanggal_kegiatan: string; lokasi?: string; sekbid_asal?: number | null; proker_id?: number | null; file_name?: string; file_type?: string; file_data_b64?: string; }) => {
+    try {
+      const res = await request<DokumentasiPDD>("/dokumentasi/pdd", { method: "POST", body: JSON.stringify(data) });
+      if (typeof window !== "undefined" && res?.id) {
+        try {
+          const raw = localStorage.getItem("canopy_dokumentasi_pdd");
+          let arr: DokumentasiPDD[] = raw ? JSON.parse(raw) : [];
+          arr.unshift(res);
+          localStorage.setItem("canopy_dokumentasi_pdd", JSON.stringify(arr));
+        } catch {}
+      }
+      return res;
+    } catch (e) {
+      console.warn("Backend create dokumentasi failed, fallback localStorage:", e);
+      if (typeof window !== "undefined") {
+        const currentUser = JSON.parse(localStorage.getItem("canopy_user") || "{}");
+        let fileUrl: string | null = null;
+        let fileName: string | null = data.file_name || null;
+        let fileType: string | null = data.file_type || null;
+        let fileSize: number | null = null;
+        if (data.file_data_b64 && data.file_name) {
+          const dataUrl = `data:${data.file_type || "application/octet-stream"};base64,${data.file_data_b64}`;
+          fileUrl = dataUrl;
+          fileSize = Math.round((data.file_data_b64.length * 3) / 4);
+        }
+        const fake: DokumentasiPDD = {
+          id: Date.now(),
+          judul: data.judul,
+          deskripsi: data.deskripsi || "",
+          kegiatan: data.kegiatan,
+          tanggal_kegiatan: data.tanggal_kegiatan,
+          lokasi: data.lokasi || "",
+          sekbid_asal: data.sekbid_asal ?? null,
+          proker_id: data.proker_id ?? null,
+          file_url: fileUrl,
+          file_name: fileName,
+          file_type: fileType,
+          file_size: fileSize,
+          dibuat_oleh: currentUser?.nis || "local",
+          created_at: new Date().toISOString(),
+        };
+        const raw = localStorage.getItem("canopy_dokumentasi_pdd");
+        let arr: DokumentasiPDD[] = raw ? JSON.parse(raw) : [];
+        arr.unshift(fake);
+        localStorage.setItem("canopy_dokumentasi_pdd", JSON.stringify(arr));
+        return fake;
+      }
+      throw e;
+    }
+  },
+
+  updateDokumentasi: async (id: number, data: { judul: string; deskripsi?: string; kegiatan: string; tanggal_kegiatan: string; lokasi?: string; sekbid_asal?: number | null; proker_id?: number | null; folder_name?: string | null; drive_url?: string | null; }) => {
+    try {
+      const res = await request<DokumentasiPDD>(`/dokumentasi/pdd/${id}`, { method: "PUT", body: JSON.stringify(data) });
+      if (typeof window !== "undefined" && res?.id) {
+        try {
+          const raw = localStorage.getItem("canopy_dokumentasi_pdd");
+          let arr: DokumentasiPDD[] = raw ? JSON.parse(raw) : [];
+          const idx = arr.findIndex((d) => d.id === id);
+          if (idx >= 0) arr[idx] = res;
+          localStorage.setItem("canopy_dokumentasi_pdd", JSON.stringify(arr));
+        } catch {}
+      }
+      return res;
+    } catch (e) {
+      console.warn("Backend update dokumentasi failed, fallback localStorage:", e);
+      if (typeof window !== "undefined") {
+        const raw = localStorage.getItem("canopy_dokumentasi_pdd");
+        if (raw) {
+          let arr: DokumentasiPDD[] = JSON.parse(raw);
+          const idx = arr.findIndex((d) => d.id === id);
+          if (idx >= 0) {
+            arr[idx] = { ...arr[idx], ...data } as DokumentasiPDD;
+            localStorage.setItem("canopy_dokumentasi_pdd", JSON.stringify(arr));
+            return arr[idx];
+          }
+        }
+      }
+      throw e;
+    }
+  },
+
+  deleteDokumentasi: async (id: number) => {
+    try {
+      const res = await request<{ message: string }>(`/dokumentasi/pdd/${id}`, { method: "DELETE" });
+      if (typeof window !== "undefined") {
+        try {
+          const raw = localStorage.getItem("canopy_dokumentasi_pdd");
+          if (raw) {
+            let arr: DokumentasiPDD[] = JSON.parse(raw);
+            localStorage.setItem("canopy_dokumentasi_pdd", JSON.stringify(arr.filter((d) => d.id !== id)));
+          }
+        } catch {}
+      }
+      return res;
+    } catch (e) {
+      console.warn("Backend delete dokumentasi failed, fallback localStorage:", e);
+      if (typeof window !== "undefined") {
+        const raw = localStorage.getItem("canopy_dokumentasi_pdd");
+        if (raw) {
+          let arr: DokumentasiPDD[] = JSON.parse(raw);
+          localStorage.setItem("canopy_dokumentasi_pdd", JSON.stringify(arr.filter((d) => d.id !== id)));
+          return { message: "Dokumentasi berhasil dihapus (lokal)" };
+        }
+      }
+      throw e;
+    }
+  },
+
+  addDokumentasiFile: async (id: number, data: { file_name: string; file_type?: string; file_data_b64?: string; drive_url?: string }) => {
+    try {
+      return await request<DokumentasiAttachmentPDD>(`/dokumentasi/pdd/${id}/files`, { method: "POST", body: JSON.stringify(data) });
+    } catch (e) {
+      console.warn("Backend add dokumentasi file failed, fallback local:", e);
+      const att: DokumentasiAttachmentPDD = {
+        id: Date.now(),
+        file_name: data.file_name,
+        file_type: data.file_type || "application/octet-stream",
+        file_size: data.file_data_b64 ? Math.round((data.file_data_b64.length * 3) / 4) : 0,
+        file_url: data.drive_url || (data.file_data_b64 ? `data:${data.file_type};base64,${data.file_data_b64}` : null),
+        drive_url: data.drive_url || null,
+        created_at: new Date().toISOString(),
+      };
+      if (typeof window !== "undefined") {
+        const raw = localStorage.getItem("canopy_dokumentasi_pdd");
+        if (raw) {
+          let arr: DokumentasiPDD[] = JSON.parse(raw);
+          const idx = arr.findIndex((d) => d.id === id);
+          if (idx >= 0) {
+            if (!arr[idx].attachments) arr[idx].attachments = [];
+            arr[idx].attachments!.push(att);
+            localStorage.setItem("canopy_dokumentasi_pdd", JSON.stringify(arr));
+          }
+        }
+      }
+      return att;
+    }
+  },
+
+  deleteDokumentasiFile: async (id: number, fileId: number) => {
+    try {
+      return await request<{ message: string }>(`/dokumentasi/pdd/${id}/files/${fileId}`, { method: "DELETE" });
+    } catch (e) {
+      console.warn("Backend delete dokumentasi file failed, fallback local:", e);
+      if (typeof window !== "undefined") {
+        const raw = localStorage.getItem("canopy_dokumentasi_pdd");
+        if (raw) {
+          let arr: DokumentasiPDD[] = JSON.parse(raw);
+          const idx = arr.findIndex((d) => d.id === id);
+          if (idx >= 0 && arr[idx].attachments) {
+            arr[idx].attachments = arr[idx].attachments!.filter((a) => a.id !== fileId);
+            localStorage.setItem("canopy_dokumentasi_pdd", JSON.stringify(arr));
+            return { message: "File berhasil dihapus (lokal)" };
+          }
+        }
+      }
+      throw e;
+    }
+  },
 
   // Announcements with resilient storage fallback
   getAnnouncements: async (): Promise<{ pengumuman: PengumumanDetail[] }> => {
