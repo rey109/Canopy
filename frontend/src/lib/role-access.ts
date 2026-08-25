@@ -35,14 +35,9 @@ export const roleNavigation: Record<RoleGroup, { label: string; href: string }[]
 
 export const profileNavigation = [
   { label: "Info", href: "/dashboard/updates" },
-  { label: "Member", href: "/dashboard/team" },
   { label: "Profile", href: "/dashboard/profile" },
   { label: "Setting", href: "/dashboard/settings" },
 ] as const;
-
-export function getProfileNavigation(user: UserDetail | null) {
-  return getRoleGroup(user) === "Staf" ? profileNavigation.filter((item) => item.label !== "Member") : profileNavigation;
-}
 
 export function getRoleGroup(user: UserDetail | null): RoleGroup {
   const group = user?.group_name;

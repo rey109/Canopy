@@ -199,7 +199,9 @@ export default function ProkerPage() {
   const roleGroup = getRoleGroup(user);
   const canManageProker = canCreateProker(user);
   const canProvideCoaching = roleGroup === "Trimitra" || roleGroup === "Pembina";
-  const isReadOnly = !canMutate(user);
+  const isReadOnly = roleGroup === "Staf" || roleGroup === "Pembina";
+  const canUpdateTask = roleGroup === "Staf";
+  const scopeLabel = roleGroup === "Staf" ? `Visibilitas: Sekbid ${user?.division_id || "sendiri"}` : user?.scope_divisi_awal == null ? "Scope: Organisasi penuh" : `Scope: Sekbid ${user?.scope_divisi_awal}–${user?.scope_divisi_akhir}`;
 
   // Filtered List Logic
   const filteredProkers = prokerList.filter((p) => {
@@ -242,13 +244,13 @@ export default function ProkerPage() {
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold tracking-wider text-blue-400 uppercase">
              <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
-             Scope {user?.scope_divisi_awal == null ? "Organisasi penuh" : `Divisi ${user?.division_id || user?.scope_divisi_awal}`} • Role: {user?.role_name || roleGroup}
+             {scopeLabel} • Role: {user?.role_name || roleGroup}
           </div>
           <h1 className="text-2xl md:text-3xl font-bold mt-1 text-slate-50">
             Monitoring Program Kerja Organisasi
           </h1>
           <p className="text-slate-400 text-sm mt-0.5 max-w-2xl">
-             {isReadOnly ? "Lihat ringkasan program kerja yang relevan dengan keterlibatanmu." : "Kelola progres program kerja, task, anggaran, dan dokumen sesuai scope jabatanmu."}
+             {roleGroup === "Staf" ? "Lihat proker yang melibatkanmu dan perbarui task milikmu saja." : isReadOnly ? "Lihat ringkasan program kerja tanpa kewenangan perubahan." : "Kelola progres program kerja, task, anggaran, dan dokumen sesuai scope jabatanmu."}
           </p>
         </div>
 
@@ -277,7 +279,7 @@ export default function ProkerPage() {
             </div>
           </div>
           <p className="text-3xl font-extrabold text-slate-100 mt-2">{totalProker}</p>
-          <p className="text-[11px] text-slate-500 mt-1">Seluruh divisi 1-10 + BPH</p>
+           <p className="text-[11px] text-slate-500 mt-1">{roleGroup === "Staf" ? "Proker yang melibatkanmu" : "Sesuai scope jabatan"}</p>
         </div>
 
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-lg">
@@ -338,13 +340,15 @@ export default function ProkerPage() {
             {/* Divisi Filter Select */}
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-slate-400">Divisi:</span>
-              <select
-                value={selectedDivisi}
+               <select
+                 disabled={roleGroup === "Staf"}
+                 value={selectedDivisi}
                 onChange={(e) => setSelectedDivisi(e.target.value)}
                 className="bg-slate-950 border border-slate-800 text-xs text-slate-200 rounded-xl p-2 focus:outline-none focus:border-blue-500"
               >
-                <option value="All">Semua Divisi (1–10)</option>
-                <option value="Divisi 1">Divisi 1 - Keagamaan</option>
+                 {roleGroup !== "Staf" && <option value="All">Semua Divisi (1–10)</option>}
+                 {roleGroup === "Staf" && <option value={`Divisi ${user?.division_id}`}>Divisi kamu</option>}
+                 {roleGroup !== "Staf" && <option value="Divisi 1">Divisi 1 - Keagamaan</option>}
                 <option value="Divisi 2">Divisi 2 - Budi Pekerti & Karakter</option>
                 <option value="Divisi 3">Divisi 3 - Kepemimpinan & Kebangsaan</option>
                 <option value="Divisi 4">Divisi 4 - Prestasi & Akademik</option>

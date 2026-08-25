@@ -268,9 +268,9 @@ func UpdateRapat(ctx context.Context, id int, params *UpdateRapatParams) (*Rapat
 	}
 
 	canEdit := false
-	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" || ud.GroupName == "Pembina" {
+	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" {
 		canEdit = true
-	} else if string(nisStr) == dibuatOleh {
+	} else if string(nisStr) == dibuatOleh && ud.GroupName != "Pembina" && ud.GroupName != "Staf" {
 		canEdit = true
 	} else if ud.GroupName == "Kepala Divisi" && divID.Valid && ud.DivisionID != nil && int(divID.Int32) == *ud.DivisionID {
 		canEdit = true
@@ -364,9 +364,9 @@ func HapusRapat(ctx context.Context, id int) (*MessageResponse, error) {
 	}
 
 	canDelete := false
-	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" || ud.GroupName == "Pembina" {
+	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" {
 		canDelete = true
-	} else if string(nisStr) == dibuatOleh {
+	} else if string(nisStr) == dibuatOleh && ud.GroupName != "Pembina" && ud.GroupName != "Staf" {
 		canDelete = true
 	} else if ud.GroupName == "Kepala Divisi" && divID.Valid && ud.DivisionID != nil && int(divID.Int32) == *ud.DivisionID {
 		canDelete = true

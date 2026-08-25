@@ -29,7 +29,12 @@ async function request<T>(
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.message || `Request failed: ${res.status}`);
+      const message = typeof body.message === "string"
+        ? body.message
+        : typeof body.error === "string"
+          ? body.error
+          : `Request gagal (${res.status})`;
+      throw new Error(`${message} [${res.status} ${path}]`);
     }
 
     return await res.json();

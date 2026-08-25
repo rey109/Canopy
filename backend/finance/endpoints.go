@@ -119,13 +119,11 @@ func CreateTransaksi(ctx context.Context, params *CreateTransaksiParams) (*Trans
 		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "sumber harus 'Manual' atau 'Scan Nota'"}
 	}
 
-	// Input manual hanya untuk Bendahara; Scan Nota untuk semua role
-	if sumber == "Manual" {
-		if ud.GroupName != "Bendahara" && ud.GroupName != "Trimitra" {
-			return nil, &errs.Error{
-				Code:    errs.PermissionDenied,
-				Message: "input manual hanya untuk Bendahara atau Trimitra",
-			}
+	// Input manual hanya untuk Bendahara; scan nota tersedia untuk semua role
+	if sumber == "Manual" && ud.GroupName != "Bendahara" {
+		return nil, &errs.Error{
+			Code:    errs.PermissionDenied,
+			Message: "input manual hanya untuk Bendahara",
 		}
 	}
 

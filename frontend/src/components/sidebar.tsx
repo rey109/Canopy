@@ -15,14 +15,6 @@ const iconMap: Record<string, React.ReactNode> = {
       <polyline points="9 22 9 12 15 12 15 22" />
     </svg>
   ),
-  "Anggota": (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 00-3-3.87" />
-      <path d="M16 3.13a4 4 0 010 7.75" />
-    </svg>
-  ),
   "Home": (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
@@ -157,14 +149,6 @@ const iconMap: Record<string, React.ReactNode> = {
       <line x1="12" y1="8" x2="12.01" y2="8" />
     </svg>
   ),
-  "Member": (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 00-3-3.87" />
-      <path d="M16 3.13a4 4 0 010 7.75" />
-    </svg>
-  ),
   "Profile": (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
@@ -231,8 +215,6 @@ const hrefMap: Record<string, string> = {
   "Serah Terima": "/dashboard/handover?view=handover",
   "Info": "/dashboard/updates",
   "Notifikasi": "/dashboard/notifications",
-  "Member": "/dashboard/team",
-  "Anggota": "/dashboard/team",
   "Profile": "/dashboard/profile",
   "Setting": "/dashboard/settings",
   "Aset": "/dashboard/assets",
@@ -250,7 +232,6 @@ const modulManajemen: { label: string; key: string }[] = [
   { label: "Aset", key: "Aset" },
   { label: "Handover", key: "Handover" },
   { label: "Public Portal", key: "Public Portal" },
-  { label: "Anggota", key: "Anggota" },
 ];
 
 interface RenderItem {

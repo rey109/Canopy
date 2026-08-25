@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { getRoleNavigation, profileNavigation } from "@/lib/role-access";
 
 const icons: Record<string, string> = {
-  Home: "⌂", Task: "✓", "Program Kerja": "▣", Rapat: "◷", Menu: "☰", Info: "ⓘ", Member: "♙", Profile: "◉", Setting: "⚙",
+  Home: "⌂", Task: "✓", "Program Kerja": "▣", Rapat: "◷", Menu: "☰", Info: "ⓘ", Profile: "◉", Setting: "⚙",
 };
 
 export default function BottomNav() {

@@ -20,7 +20,8 @@ export default function UpdatesPage() {
       const res = await api.getAnnouncements();
       setAnnouncements(res.pengumuman || []);
     } catch (err) {
-      console.error(err);
+      console.error("Gagal memuat pengumuman:", err);
+      setAnnouncements([]);
     } finally {
       setLoading(false);
     }
@@ -38,8 +39,8 @@ export default function UpdatesPage() {
       setTitle("");
       setBody("");
       fetchAnnouncements();
-    } catch (err: any) {
-      alert("Error: " + err.message);
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Gagal menerbitkan pengumuman.");
     }
   };
 

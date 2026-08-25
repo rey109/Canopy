@@ -18,7 +18,7 @@ export default function RoleContextCard({ title = "Ruang kerja kamu" }: { title?
   };
   const links: Record<string, string> = {
     Staf: "/dashboard/task",
-    "Kepala Divisi": "/dashboard/team",
+    "Kepala Divisi": "/dashboard/team/" + (user?.division_id || "1"),
     Bendahara: "/dashboard/finance",
     Sekretaris: "/dashboard/secretary",
     Trimitra: "/dashboard/organization",
