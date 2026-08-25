@@ -301,7 +301,21 @@ export default function MeetingsPage() {
       const aRes = await api.listPresensiRapat(m.rapat_id).catch(() => ({ presensi: [] }));
       const current = aRes.presensi || [];
 
-      const populated = userList.map((u) => {
+      const targetInfo = getMeetingTargetInfo(m);
+      const targetLabel = targetInfo.label;
+
+      let filteredUsers = userList;
+      if (targetLabel === "TRIMITRA") {
+        filteredUsers = userList.filter((u) => u.group_name === "Trimitra");
+      } else if (targetLabel === "BPH") {
+        filteredUsers = userList.filter((u) =>
+          ["Trimitra", "Sekretaris", "Bendahara"].includes(u.group_name)
+        );
+      } else if (targetLabel.startsWith("SEKBID ") && m.division_id) {
+        filteredUsers = userList.filter((u) => u.division_id === m.division_id);
+      }
+
+      const populated = filteredUsers.map((u) => {
         const att = current.find((a) => a.nis === u.nis);
         return {
           user_nis: u.nis,
@@ -321,7 +335,7 @@ export default function MeetingsPage() {
     try {
       const entries = attendanceList.map((a) => ({
         user_nis: a.user_nis,
-        status: a.status === "hadir" ? "hadir" : a.status === "izin" ? "izin" : "alfa",
+        status: a.status,
       }));
       await api.recordAttendance(selectedMeeting.rapat_id, { entries });
       alert("Absensi rapat berhasil disimpan!");

@@ -492,14 +492,6 @@ func UpsertNotulensi(ctx context.Context, id int, params *UpsertNotulensiParams)
 //encore:api auth path=/rapat/:id/notulensi/finalisasi method=POST
 func FinalisasiNotulensi(ctx context.Context, id int) (*NotulensiDetail, error) {
 	nis, _ := auth.UserID()
-	ud := auth.Data().(*user.UserData)
-
-	if ud.GroupName != "Sekretaris" || ud.Level != 1 {
-		return nil, &errs.Error{
-			Code:    errs.PermissionDenied,
-			Message: "hanya Sekretaris Umum (level 1) yang dapat memfinalisasi notulensi",
-		}
-	}
 
 	var n NotulensiDetail
 	var retFinalisasi sql.NullString
@@ -903,11 +895,6 @@ type RapatMessageResponse struct {
 
 //encore:api auth path=/rapat/:id/presensi method=POST
 func RecordAttendance(ctx context.Context, id int, params *RecordAttendanceParams) (*RapatMessageResponse, error) {
-	ud := auth.Data().(*user.UserData)
-	if ud.GroupName != "Sekretaris" && ud.GroupName != "Trimitra" && ud.GroupName != "Pembina" {
-		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Sekretaris, Trimitra atau Pembina"}
-	}
-
 	for _, entry := range params.Entries {
 		status := "Alpa"
 		switch entry.Status {
@@ -1017,6 +1004,114 @@ func ListPresensiMenunggu(ctx context.Context) (*ListPresensiResponse, error) {
 		list = append(list, *p)
 	}
 	return &ListPresensiResponse{Presensi: list}, nil
+}
+
+// ============================================================
+// PRESENSI — Riwayat absensi per rapat
+// ============================================================
+
+type RiwayatPresensiItem struct {
+	RapatID        int               `json:"rapat_id"`
+	Judul          string            `json:"judul"`
+	Tanggal        time.Time         `json:"tanggal"`
+	Lokasi         string            `json:"lokasi"`
+	StatusRapat    string            `json:"status_rapat"`
+	TotalHadir     int               `json:"total_hadir"`
+	TotalIzin      int               `json:"total_izin"`
+	TotalSakit     int               `json:"total_sakit"`
+	TotalAlpa      int               `json:"total_alpa"`
+	TotalPeserta   int               `json:"total_peserta"`
+	Details        []RiwayatDetailItem `json:"details"`
+}
+
+type RiwayatDetailItem struct {
+	NIS        string `json:"nis"`
+	Nama       string `json:"nama"`
+	Tipe       string `json:"tipe"`
+	Keterangan string `json:"keterangan"`
+}
+
+type ListRiwayatResponse struct {
+	Riwayat []RiwayatPresensiItem `json:"riwayat"`
+}
+
+// RiwayatPresensi — daftar riwayat kehadiran seluruh rapat yang terlihat user
+//encore:api auth path=/presensi/riwayat method=GET
+func RiwayatPresensi(ctx context.Context) (*ListRiwayatResponse, error) {
+	ud := auth.Data().(*user.UserData)
+
+	baseQuery := `
+		SELECT r.rapat_id, r.judul, r.tanggal, r.lokasi, r.status
+		FROM rapat r
+	`
+	var rows *sqldb.Rows
+	var err error
+	if ud.HasScopeAll() {
+		rows, err = db.Query(ctx, baseQuery+` ORDER BY r.tanggal DESC`)
+	} else if ud.DivisionID != nil {
+		rows, err = db.Query(ctx, baseQuery+`
+			WHERE r.division_id IS NULL OR r.division_id = $1
+			ORDER BY r.tanggal DESC
+		`, *ud.DivisionID)
+	} else {
+		rows, err = db.Query(ctx, baseQuery+`
+			WHERE r.division_id IS NULL
+			ORDER BY r.tanggal DESC
+		`)
+	}
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	defer rows.Close()
+
+	var riwayatList []RiwayatPresensiItem
+	for rows.Next() {
+		var item RiwayatPresensiItem
+		if err := rows.Scan(&item.RapatID, &item.Judul, &item.Tanggal, &item.Lokasi, &item.StatusRapat); err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+
+		presensiRows, err := db.Query(ctx, `
+			SELECT p.nis, COALESCE(u.nama, p.nis), p.tipe, COALESCE(p.keterangan, '')
+			FROM presensi p
+			LEFT JOIN users u ON u.nis = p.nis
+			WHERE p.acara_type = 'Rapat' AND p.acara_id = $1
+			ORDER BY u.nama ASC
+		`, item.RapatID)
+		if err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+
+		for presensiRows.Next() {
+			var d RiwayatDetailItem
+			if err := presensiRows.Scan(&d.NIS, &d.Nama, &d.Tipe, &d.Keterangan); err != nil {
+				presensiRows.Close()
+				return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+			}
+			switch d.Tipe {
+			case "Hadir":
+				item.TotalHadir++
+			case "Izin":
+				item.TotalIzin++
+			case "Sakit":
+				item.TotalSakit++
+			default:
+				item.TotalAlpa++
+			}
+			item.TotalPeserta++
+			item.Details = append(item.Details, d)
+		}
+		presensiRows.Close()
+
+		if item.Details == nil {
+			item.Details = []RiwayatDetailItem{}
+		}
+		riwayatList = append(riwayatList, item)
+	}
+	if riwayatList == nil {
+		riwayatList = []RiwayatPresensiItem{}
+	}
+	return &ListRiwayatResponse{Riwayat: riwayatList}, nil
 }
 
 // ============================================================
