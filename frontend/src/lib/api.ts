@@ -83,6 +83,19 @@ export interface ProkerDetail {
   created_at: string;
 }
 
+// Status otomatis: jika tanggal_selesai sudah lewat dan status masih
+// "Belum Mulai"/"Berjalan", tampilkan sebagai "Selesai"
+function withAutoStatus<T extends ProkerDetail>(p: T): T {
+  if (
+    (p.status === "Belum Mulai" || p.status === "Berjalan") &&
+    p.tanggal_selesai &&
+    new Date(p.tanggal_selesai).getTime() < Date.now()
+  ) {
+    return { ...p, status: "Selesai" };
+  }
+  return p;
+}
+
 export interface TaskDetail {
   task_id: number;
   proker_id: number;
@@ -500,13 +513,50 @@ export const api = {
     request<{ modules: ModuleEntry[] }>("/modules"),
 
   // Proker
-  listProkers: () =>
-    request<{ prokers: ProkerDetail[] }>("/prokers"),
+  listProkers: async () => {
+    try {
+      const res = await request<{ prokers: ProkerDetail[] }>("/prokers");
+      if (res && Array.isArray(res.prokers)) {
+        res.prokers = res.prokers.map(withAutoStatus);
+        if (typeof window !== "undefined") {
+          try { localStorage.setItem("canopy_prokers", JSON.stringify(res.prokers)); } catch {}
+        }
+      }
+      return res;
+    } catch (e) {
+      console.warn("Backend listProkers failed, fallback localStorage:", e);
+      if (typeof window !== "undefined") {
+        const raw = localStorage.getItem("canopy_prokers");
+        if (raw) {
+          try {
+            return { prokers: (JSON.parse(raw) as ProkerDetail[]).map(withAutoStatus) };
+          } catch {}
+        }
+      }
+      return { prokers: [] };
+    }
+  },
 
-  getProker: (id: number) =>
-    request<ProkerDetail>(`/proker/${id}`),
+  getProker: async (id: number) => {
+    try {
+      return withAutoStatus(await request<ProkerDetail>(`/proker/${id}`));
+    } catch (e) {
+      console.warn("Backend getProker failed, fallback localStorage:", e);
+      if (typeof window !== "undefined") {
+        const raw = localStorage.getItem("canopy_prokers");
+        if (raw) {
+          try {
+            const arr = JSON.parse(raw) as ProkerDetail[];
+            const found = arr.find((p) => p.proker_id === id);
+            if (found) return withAutoStatus(found);
+          } catch {}
+        }
+      }
+      throw e;
+    }
+  },
 
-  createProker: (data: {
+  createProker: async (data: {
     nama: string;
     deskripsi: string;
     division_id?: number;
@@ -514,11 +564,126 @@ export const api = {
     penanggung_jawab?: string;
     tanggal_mulai: string;
     tanggal_selesai: string;
-  }) =>
-    request<ProkerDetail>("/proker", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
+  }) => {
+    try {
+      const res = await request<ProkerDetail>("/proker", {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+      if (typeof window !== "undefined" && res?.proker_id) {
+        try {
+          const raw = localStorage.getItem("canopy_prokers");
+          let arr: ProkerDetail[] = raw ? JSON.parse(raw) : [];
+          arr.unshift(res);
+          localStorage.setItem("canopy_prokers", JSON.stringify(arr));
+        } catch {}
+      }
+      return res;
+    } catch (e) {
+      console.warn("Backend createProker failed, fallback localStorage:", e);
+      if (typeof window !== "undefined") {
+        let currentUser: any = {};
+        try { currentUser = JSON.parse(localStorage.getItem("canopy_user") || "{}"); } catch {}
+        const fake: ProkerDetail = {
+          proker_id: Date.now(),
+          division_id: data.division_id ?? null,
+          periode_id: 0,
+          nama: data.nama,
+          deskripsi: data.deskripsi,
+          anggaran_disetujui: data.anggaran_disetujui,
+          status: "Belum Mulai",
+          penanggung_jawab: data.penanggung_jawab ?? null,
+          tanggal_mulai: data.tanggal_mulai,
+          tanggal_selesai: data.tanggal_selesai,
+          dibuat_oleh: currentUser?.nis || "local",
+          created_at: new Date().toISOString(),
+        };
+        const raw = localStorage.getItem("canopy_prokers");
+        let arr: ProkerDetail[] = raw ? JSON.parse(raw) : [];
+        arr.unshift(fake);
+        localStorage.setItem("canopy_prokers", JSON.stringify(arr));
+        return fake;
+      }
+      throw e;
+    }
+  },
+
+  updateProker: async (
+    id: number,
+    data: {
+      nama: string;
+      deskripsi: string;
+      division_id?: number;
+      anggaran_disetujui: number;
+      penanggung_jawab?: string;
+      tanggal_mulai: string;
+      tanggal_selesai: string;
+    }
+  ) => {
+    try {
+      const res = await request<ProkerDetail>(`/proker/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(data),
+      });
+      if (typeof window !== "undefined" && res?.proker_id) {
+        try {
+          const raw = localStorage.getItem("canopy_prokers");
+          let arr: ProkerDetail[] = raw ? JSON.parse(raw) : [];
+          const idx = arr.findIndex((p) => p.proker_id === id);
+          if (idx >= 0) arr[idx] = res;
+          localStorage.setItem("canopy_prokers", JSON.stringify(arr));
+        } catch {}
+      }
+      return res;
+    } catch (e) {
+      console.warn("Backend updateProker failed, fallback localStorage:", e);
+      if (typeof window !== "undefined") {
+        let old: ProkerDetail | undefined;
+        try {
+          const raw = localStorage.getItem("canopy_prokers");
+          if (raw) old = (JSON.parse(raw) as ProkerDetail[]).find((p) => p.proker_id === id);
+        } catch {}
+        if (!old) throw e;
+        const updated: ProkerDetail = {
+          ...old,
+          nama: data.nama,
+          deskripsi: data.deskripsi,
+          division_id: data.division_id ?? null,
+          anggaran_disetujui: data.anggaran_disetujui,
+          penanggung_jawab: data.penanggung_jawab ?? null,
+          tanggal_mulai: data.tanggal_mulai,
+          tanggal_selesai: data.tanggal_selesai,
+        };
+        try {
+          const raw = localStorage.getItem("canopy_prokers");
+          let arr: ProkerDetail[] = raw ? JSON.parse(raw) : [];
+          const idx = arr.findIndex((p) => p.proker_id === id);
+          if (idx >= 0) arr[idx] = updated;
+          localStorage.setItem("canopy_prokers", JSON.stringify(arr));
+        } catch {}
+        return updated;
+      }
+      throw e;
+    }
+  },
+
+  deleteProker: async (id: number) => {
+    try {
+      await request<void>(`/proker/${id}`, { method: "DELETE" });
+    } catch (e) {
+      console.warn("Backend deleteProker failed, fallback localStorage:", e);
+    }
+    // Bersihkan cache lokal apa pun hasilnya agar UI konsisten
+    if (typeof window !== "undefined") {
+      try {
+        const raw = localStorage.getItem("canopy_prokers");
+        if (raw) {
+          const arr = (JSON.parse(raw) as ProkerDetail[]).filter((p) => p.proker_id !== id);
+          localStorage.setItem("canopy_prokers", JSON.stringify(arr));
+        }
+      } catch {}
+    }
+  },
 
   // Task Template
   createTaskTemplate: (data: {

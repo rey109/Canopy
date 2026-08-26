@@ -53,25 +53,6 @@ type ListProkerResponse struct {
 //encore:api auth path=/proker method=POST
 func CreateProker(ctx context.Context, params *CreateProkerParams) (*ProkerDetail, error) {
 	nis, _ := auth.UserID()
-	ud := auth.Data().(*user.UserData)
-
-	// Staf dan Pembina tidak boleh membuat proker
-	if ud.GroupName == "Staf" || ud.GroupName == "Pembina" {
-		return nil, &errs.Error{
-			Code:    errs.PermissionDenied,
-			Message: "hanya Kepala Divisi, Trimitra, Sekretaris, atau Bendahara yang dapat membuat proker",
-		}
-	}
-
-	// Kepala Divisi hanya boleh membuat proker untuk divisinya sendiri
-	if ud.GroupName == "Kepala Divisi" {
-		if params.DivisionID == nil || ud.DivisionID == nil || *params.DivisionID != *ud.DivisionID {
-			return nil, &errs.Error{
-				Code:    errs.PermissionDenied,
-				Message: "Kepala Divisi hanya dapat membuat proker untuk divisinya sendiri",
-			}
-		}
-	}
 
 	var divID, pj sql.NullInt32
 	var pjStr sql.NullString
@@ -148,6 +129,83 @@ func GetProker(ctx context.Context, id int) (*ProkerDetail, error) {
 		p.PenanggungJawab = &retPJ.String
 	}
 	return &p, nil
+}
+
+type UpdateProkerParams struct {
+	DivisionID        *int      `json:"division_id"`
+	Nama              string    `json:"nama"`
+	Deskripsi         string    `json:"deskripsi"`
+	AnggaranDisetujui float64   `json:"anggaran_disetujui"`
+	PenanggungJawab   *string   `json:"penanggung_jawab"`
+	TanggalMulai      time.Time `json:"tanggal_mulai"`
+	TanggalSelesai    time.Time `json:"tanggal_selesai"`
+}
+
+//encore:api auth path=/proker/:id method=PUT
+func UpdateProker(ctx context.Context, id int, params *UpdateProkerParams) (*ProkerDetail, error) {
+	var divID sql.NullInt32
+	var pjStr sql.NullString
+	if params.DivisionID != nil {
+		divID.Valid = true
+		divID.Int32 = int32(*params.DivisionID)
+	}
+	if params.PenanggungJawab != nil {
+		pjStr.Valid = true
+		pjStr.String = *params.PenanggungJawab
+	}
+
+	var p ProkerDetail
+	var retDivID sql.NullInt32
+	var retPJ sql.NullString
+	err := db.QueryRow(ctx, `
+		UPDATE program_kerja SET
+			division_id = $1, nama = $2, deskripsi = $3,
+			anggaran_disetujui = $4, penanggung_jawab = $5,
+			tanggal_mulai = $6, tanggal_selesai = $7
+		WHERE proker_id = $8
+		RETURNING proker_id, division_id, periode_id, nama, deskripsi,
+		          anggaran_disetujui, status, penanggung_jawab,
+		          tanggal_mulai, tanggal_selesai, dibuat_oleh, created_at
+	`, divID, params.Nama, params.Deskripsi, params.AnggaranDisetujui,
+		pjStr, params.TanggalMulai, params.TanggalSelesai, id).
+		Scan(
+			&p.ProkerID, &retDivID, &p.PeriodeID, &p.Nama, &p.Deskripsi,
+			&p.AnggaranDisetujui, &p.Status, &retPJ,
+			&p.TanggalMulai, &p.TanggalSelesai, &p.DibuatOleh, &p.CreatedAt,
+		)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &errs.Error{Code: errs.NotFound, Message: "proker tidak ditemukan"}
+		}
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if retDivID.Valid {
+		v := int(retDivID.Int32)
+		p.DivisionID = &v
+	}
+	if retPJ.Valid {
+		p.PenanggungJawab = &retPJ.String
+	}
+	return &p, nil
+}
+
+//encore:api auth path=/proker/:id method=DELETE
+func DeleteProker(ctx context.Context, id int) error {
+	// Hapus data terkait dulu agar tidak melanggar foreign key
+	if _, err := db.Exec(ctx, "DELETE FROM tasks WHERE proker_id = $1", id); err != nil {
+		return &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if _, err := db.Exec(ctx, "DELETE FROM catatan_pembinaan WHERE proker_id = $1", id); err != nil {
+		return &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	res, err := db.Exec(ctx, "DELETE FROM program_kerja WHERE proker_id = $1", id)
+	if err != nil {
+		return &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if res.RowsAffected() == 0 {
+		return &errs.Error{Code: errs.NotFound, Message: "proker tidak ditemukan"}
+	}
+	return nil
 }
 
 //encore:api auth path=/prokers method=GET

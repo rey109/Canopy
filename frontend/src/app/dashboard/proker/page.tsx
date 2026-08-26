@@ -19,6 +19,7 @@ export default function ProkerPage() {
   const [showModal, setShowModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [actioningId, setActioningId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
 
   // Form State
   const [name, setName] = useState("");
@@ -40,19 +41,55 @@ export default function ProkerPage() {
     fetchProkers();
   }, []);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const openCreate = () => {
+    setEditingId(null);
+    setName("");
+    setDescription("");
+    setBudget("");
+    setStartDate("");
+    setEndDate("");
+    setShowModal(true);
+  };
+
+  const openEdit = (p: ProkerDetail) => {
+    setEditingId(p.proker_id);
+    setName(p.nama);
+    setDescription(p.deskripsi);
+    setBudget(String(p.anggaran_disetujui));
+    setStartDate(p.tanggal_mulai?.slice(0, 10) || "");
+    setEndDate(p.tanggal_selesai?.slice(0, 10) || "");
+    setShowModal(true);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setEditingId(null);
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await api.createProker({
-        nama: name,
-        deskripsi: description,
-        division_id: user?.division_id || undefined,
-        anggaran_disetujui: Number(budget),
-        tanggal_mulai: new Date(startDate).toISOString(),
-        tanggal_selesai: new Date(endDate).toISOString(),
-      });
-      setShowModal(false);
+      if (editingId) {
+        await api.updateProker(editingId, {
+          nama: name,
+          deskripsi: description,
+          division_id: user?.division_id || undefined,
+          anggaran_disetujui: Number(budget),
+          tanggal_mulai: new Date(startDate).toISOString(),
+          tanggal_selesai: new Date(endDate).toISOString(),
+        });
+      } else {
+        await api.createProker({
+          nama: name,
+          deskripsi: description,
+          division_id: user?.division_id || undefined,
+          anggaran_disetujui: Number(budget),
+          tanggal_mulai: new Date(startDate).toISOString(),
+          tanggal_selesai: new Date(endDate).toISOString(),
+        });
+      }
+      closeModal();
       // Reset form
       setName("");
       setDescription("");
@@ -61,9 +98,22 @@ export default function ProkerPage() {
       setEndDate("");
       fetchProkers();
     } catch (err: any) {
-      alert("Gagal membuat program kerja: " + err.message);
+      alert("Gagal menyimpan program kerja: " + err.message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (proker_id: number, nama: string) => {
+    if (!confirm(`Hapus program kerja "${nama}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+    setActioningId(proker_id);
+    try {
+      await api.deleteProker(proker_id);
+      fetchProkers();
+    } catch (err: any) {
+      alert("Gagal menghapus program kerja: " + err.message);
+    } finally {
+      setActioningId(null);
     }
   };
 
@@ -105,15 +155,13 @@ export default function ProkerPage() {
             Kelola seluruh program kerja organisasi
           </p>
         </div>
-        {isKetuaBidang && (
-          <button onClick={() => setShowModal(true)} className="btn-primary">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Buat Proker
-          </button>
-        )}
+        <button onClick={openCreate} className="btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          Buat Proker
+        </button>
       </div>
 
       {loading ? (
@@ -159,8 +207,8 @@ export default function ProkerPage() {
                   </div>
                 </div>
 
-                {canSubmit && (
-                  <div className="flex items-center self-end md:self-center">
+                <div className="flex flex-col items-end gap-2 self-end md:self-center">
+                  {canSubmit && (
                     <button
                       onClick={() => handleAjukanProposal(p.proker_id)}
                       disabled={actioningId === p.proker_id}
@@ -168,8 +216,20 @@ export default function ProkerPage() {
                     >
                       {actioningId === p.proker_id ? "Memproses..." : "Ajukan Proposal"}
                     </button>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => openEdit(p)} className="btn-secondary text-xs whitespace-nowrap">
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete(p.proker_id, p.nama)}
+                      disabled={actioningId === p.proker_id}
+                      className="btn-danger text-xs whitespace-nowrap"
+                    >
+                      {actioningId === p.proker_id ? "Menghapus..." : "Hapus"}
+                    </button>
                   </div>
-                )}
+                </div>
               </div>
             );
           })}
@@ -180,8 +240,10 @@ export default function ProkerPage() {
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="glass-card p-6 w-full max-w-lg space-y-4">
-            <h3 className="text-lg font-semibold">✨ Buat Program Kerja Baru</h3>
-            <form onSubmit={handleCreate} className="space-y-4">
+            <h3 className="text-lg font-semibold">
+              {editingId ? "✏️ Edit Program Kerja" : "✨ Buat Program Kerja Baru"}
+            </h3>
+            <form onSubmit={handleSave} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Nama Program Kerja</label>
                 <input
@@ -241,11 +303,11 @@ export default function ProkerPage() {
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="btn-secondary text-xs">
+                <button type="button" onClick={closeModal} className="btn-secondary text-xs">
                   Batal
                 </button>
                 <button type="submit" disabled={submitting} className="btn-primary text-xs">
-                  {submitting ? "Menyimpan..." : "Simpan Proker"}
+                  {submitting ? "Menyimpan..." : editingId ? "Simpan Perubahan" : "Simpan Proker"}
                 </button>
               </div>
             </form>

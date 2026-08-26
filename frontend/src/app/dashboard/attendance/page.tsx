@@ -4,6 +4,8 @@ import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
 import { api, type PresensiDetail, type RapatDetail } from "@/lib/api";
 
+const NAMA_BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+
 export default function AttendancePage() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<"pribadi" | "rekap" | "gabungan" | "scan">("pribadi");
@@ -12,6 +14,8 @@ export default function AttendancePage() {
   const [anggotaAll, setAnggotaAll] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterDivisi, setFilterDivisi] = useState<string>("semua");
+  const [filterBulan, setFilterBulan] = useState<string>(""); // "" = semua bulan
+  const [filterTahun, setFilterTahun] = useState<string>(String(new Date().getFullYear()));
   const [scanRapatId, setScanRapatId] = useState<string>("");
   const [scanQr, setScanQr] = useState<string>("");
   const [scanTipe, setScanTipe] = useState<"Hadir"|"Izin"|"Sakit">("Hadir");
@@ -73,7 +77,47 @@ export default function AttendancePage() {
 
   useEffect(() => { if (user) fetchData(); }, [user]);
 
-  const personalRecords = presensiAll.filter((p) => p.nis === user?.nis);
+  // ===== Filter per bulan (Januari–Desember) =====
+  const daftarTahun = (() => {
+    const years = new Set<string>();
+    for (const p of presensiAll) {
+      const k = p.waktu_submit?.slice(0, 4);
+      if (k && /^\d{4}$/.test(k)) years.add(k);
+    }
+    for (const m of meetings) {
+      const k = m.tanggal?.slice(0, 4);
+      if (k && /^\d{4}$/.test(k)) years.add(k);
+    }
+    years.add(String(new Date().getFullYear()));
+    return Array.from(years).sort().reverse();
+  })();
+
+  const tahunAktif = daftarTahun.includes(filterTahun) ? filterTahun : daftarTahun[0];
+
+  const labelPeriode = () =>
+    !filterBulan ? "Semua Bulan" : `${NAMA_BULAN[Number(filterBulan) - 1]} ${tahunAktif}`;
+
+  const dalamBulan = (tanggal?: string) =>
+    !filterBulan || tanggal?.slice(0, 7) === `${tahunAktif}-${filterBulan}`;
+
+  const presensiTersaring = presensiAll.filter((p) => dalamBulan(p.waktu_submit));
+  const rapatTersaring = meetings.filter((m) => dalamBulan(m.tanggal));
+
+  const BulanSelect = (
+    <div className="flex gap-1">
+      {daftarTahun.length > 1 && (
+        <select value={tahunAktif} onChange={(e) => setFilterTahun(e.target.value)} className="input-field bg-[var(--bg-primary)] text-xs py-1.5">
+          {daftarTahun.map((y) => <option key={y} value={y}>{y}</option>)}
+        </select>
+      )}
+      <select value={filterBulan} onChange={(e) => setFilterBulan(e.target.value)} className="input-field bg-[var(--bg-primary)] text-xs py-1.5">
+        <option value="">Semua Bulan</option>
+        {NAMA_BULAN.map((nm, i) => <option key={nm} value={String(i + 1).padStart(2, "0")}>{nm}</option>)}
+      </select>
+    </div>
+  );
+
+  const personalRecords = presensiAll.filter((p) => p.nis === user?.nis && dalamBulan(p.waktu_submit));
   const stats = {
     hadir: personalRecords.filter((p) => p.tipe.toLowerCase() === "hadir").length,
     izin: personalRecords.filter((p) => p.tipe.toLowerCase() === "izin").length,
@@ -144,9 +188,12 @@ export default function AttendancePage() {
             <div className="card p-4 text-center"><p className="text-2xl font-bold text-red-500">{stats.alpa}</p><p className="text-xs text-[var(--text-muted)] mt-1">Alpa</p></div>
           </div>
           <div className="card">
-            <div className="p-4 border-b border-[var(--border)] flex justify-between items-center">
+            <div className="p-4 border-b border-[var(--border)] flex justify-between items-center gap-3">
               <h3 className="font-semibold">Riwayat Kehadiran</h3>
-              <span className="text-xs text-[var(--text-muted)]">{personalRecords.length} records</span>
+              <div className="flex items-center gap-2">
+                {BulanSelect}
+                <span className="text-xs text-[var(--text-muted)]">{personalRecords.length} records</span>
+              </div>
             </div>
             {loading ? <div className="p-8 text-center text-[var(--text-muted)]">Memuat...</div> :
              personalRecords.length===0 ? <div className="p-8 text-center text-[var(--text-muted)]">Belum ada presensi. Gunakan tab Scan QR atau minta Sekretaris input absensi rapat.</div> :
@@ -172,13 +219,16 @@ export default function AttendancePage() {
 
       {activeTab === "rekap" && canSeeRekap && (
         <div className="card p-6">
-          <h3 className="font-semibold mb-4">Rekap Kehadiran — {rekapTitle}</h3>
-          {presensiAll.length===0 ? <p className="text-sm text-[var(--text-muted)] text-center py-8">Belum ada data presensi. Data akan muncul setelah absensi rapat disimpan (via Meetings → Absensi).</p> :
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <h3 className="font-semibold">Rekap Kehadiran — {rekapTitle}</h3>
+            {BulanSelect}
+          </div>
+          {presensiTersaring.length===0 ? <p className="text-sm text-[var(--text-muted)] text-center py-8">Belum ada data presensi{!filterBulan ? "" : ` pada ${labelPeriode()}`}. Data akan muncul setelah absensi rapat disimpan (via Meetings → Absensi).</p> :
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="text-xs text-[var(--text-muted)] border-b"><th className="text-left p-2">Rapat</th><th className="text-left p-2">NIS</th><th className="text-left p-2">Tipe</th><th className="text-left p-2">Status</th><th className="text-left p-2">Waktu</th></tr></thead>
               <tbody>
-                {presensiAll.slice(0, 50).map((p)=>(
+                {presensiTersaring.slice(0, 50).map((p)=>(
                   <tr key={p.presensi_id} className="border-b border-[var(--border)]">
                     <td className="p-2 text-xs">{getRapatTitle(p.acara_id)} <span className="text-[10px] text-[var(--text-muted)]">#{p.acara_id}</span></td>
                     <td className="p-2 text-xs">{p.nis}</td>
@@ -189,7 +239,7 @@ export default function AttendancePage() {
                 ))}
               </tbody>
             </table>
-            {presensiAll.length>50 && <p className="text-xs text-[var(--text-muted)] mt-2">Menampilkan 50 dari {presensiAll.length} records.</p>}
+            {presensiTersaring.length>50 && <p className="text-xs text-[var(--text-muted)] mt-2">Menampilkan 50 dari {presensiTersaring.length} records.</p>}
           </div>
           }
         </div>
@@ -204,39 +254,41 @@ export default function AttendancePage() {
                 <p className="text-xs text-[var(--text-muted)] mt-1">Rekap terpisah & disatukan untuk semua anggota agar sekretaris mudah mendata. Data dari <code>anggota</code> + <code>presensi</code> (database + local fallback).</p>
               </div>
               <div className="flex gap-2">
+                {BulanSelect}
                 <select value={filterDivisi} onChange={(e)=>setFilterDivisi(e.target.value)} className="input-field bg-[var(--bg-primary)] text-xs py-1.5">
                   <option value="semua">Semua SEKBID</option>
                   {Array.from({length:10},(_,i)=><option key={i+1} value={String(i+1)}>SEKBID {i+1}</option>)}
                 </select>
                 <button onClick={()=>{
                   const rows = anggotaAll.filter((a:any)=> filterDivisi==="semua" || String(a.division_id)===filterDivisi).map((m:any)=>{
-                    const recs = presensiAll.filter(p=>p.nis===m.nis);
+                    const recs = presensiTersaring.filter(p=>p.nis===m.nis);
                     const hadir = recs.filter(r=>r.tipe.toLowerCase()==="hadir").length;
                     const izin = recs.filter(r=>r.tipe.toLowerCase()==="izin").length;
                     const sakit = recs.filter(r=>r.tipe.toLowerCase()==="sakit").length;
                     const alpa = recs.filter(r=>r.tipe.toLowerCase()==="alpa").length;
-                    const total = meetings.length || 1;
+                    const total = rapatTersaring.length || 1;
                     const hadirRate = ((hadir/total)*100).toFixed(0);
                     return [m.nis, m.nama, `SEKBID ${m.division_id}`, hadir, izin, sakit, alpa, `${hadirRate}%`].join(",");
                   });
-                  const csv = ["NIS,Nama,SEKBID,Hadir,Izin,Sakit,Alpa,Hadir%"].concat(rows).join("\n");
+                  const periode = !filterBulan ? "semua-bulan" : labelPeriode().replace(/\s+/g,"-");
+                  const csv = [`Rekap: ${periode}`, "NIS,Nama,SEKBID,Hadir,Izin,Sakit,Alpa,Hadir%"].concat(rows).join("\n");
                   const blob = new Blob([csv], {type:"text/csv"});
                   const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a"); a.href=url; a.download=`rekap-gabungan-${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url);
+                  const a = document.createElement("a"); a.href=url; a.download=`rekap-gabungan-${!filterBulan ? "semua-bulan" : `${tahunAktif}-${filterBulan}`}.csv`; a.click(); URL.revokeObjectURL(url);
                 }} className="btn-secondary text-xs">Export CSV</button>
               </div>
             </div>
             {(() => {
               const filteredAnggota = anggotaAll.filter((a:any)=> filterDivisi==="semua" || String(a.division_id)===filterDivisi);
               if (filteredAnggota.length===0) return <p className="text-sm text-[var(--text-muted)] text-center py-8">Belum ada data anggota. Tambahkan di Team → SEKBID → Tambah Anggota.</p>;
-              const totalRapat = meetings.length;
+              const totalRapat = rapatTersaring.length;
               return (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead><tr className="text-xs text-[var(--text-muted)] border-b"><th className="text-left p-2">#</th><th className="text-left p-2">Nama / NIS</th><th className="text-left p-2">SEKBID</th><th className="text-center p-2">Hadir</th><th className="text-center p-2">Izin</th><th className="text-center p-2">Sakit</th><th className="text-center p-2">Alpa</th><th className="text-center p-2">%</th><th className="text-left p-2">Detail Rapat</th></tr></thead>
                     <tbody>
                       {filteredAnggota.map((m:any, idx:number)=>{
-                        const recs = presensiAll.filter(p=>p.nis===m.nis);
+                        const recs = presensiTersaring.filter(p=>p.nis===m.nis);
                         const hadir = recs.filter(r=>r.tipe.toLowerCase()==="hadir").length;
                         const izin = recs.filter(r=>r.tipe.toLowerCase()==="izin").length;
                         const sakit = recs.filter(r=>r.tipe.toLowerCase()==="sakit").length;
@@ -255,13 +307,13 @@ export default function AttendancePage() {
                             <td className="p-2 text-center"><span className={`text-xs font-bold ${rate>=75?"text-green-500":rate>=50?"text-yellow-500":"text-red-500"}`}>{rate}%</span></td>
                             <td className="p-2">
                               <div className="flex gap-1 flex-wrap max-w-[220px]">
-                                {meetings.slice(0,5).map((rap:any)=>{
+                                {rapatTersaring.slice(0,5).map((rap:any)=>{
                                   const pr = recs.find(r=>r.acara_id===rap.rapat_id);
                                   const tipe = pr ? pr.tipe : "Belum";
                                   const color = tipe.toLowerCase()==="hadir" ? "bg-green-500" : tipe.toLowerCase()==="izin" ? "bg-yellow-500" : tipe.toLowerCase()==="sakit" ? "bg-blue-500" : tipe.toLowerCase()==="alpa" ? "bg-red-500" : "bg-gray-500";
                                   return <span key={rap.rapat_id} className={`w-2 h-2 rounded-full ${color}`} title={`${rap.judul}: ${tipe}`}></span>;
                                 })}
-                                {meetings.length>5 && <span className="text-[10px] text-[var(--text-muted)]">+{meetings.length-5}</span>}
+                                {rapatTersaring.length>5 && <span className="text-[10px] text-[var(--text-muted)]">+{rapatTersaring.length-5}</span>}
                               </div>
                             </td>
                           </tr>
@@ -271,9 +323,9 @@ export default function AttendancePage() {
                   </table>
                   <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div className="bg-[var(--bg-primary)] p-3 rounded"><p className="text-xs text-[var(--text-muted)]">Total Anggota</p><p className="font-bold">{filteredAnggota.length}</p></div>
-                    <div className="bg-[var(--bg-primary)] p-3 rounded"><p className="text-xs text-[var(--text-muted)]">Total Rapat</p><p className="font-bold">{totalRapat}</p></div>
-                    <div className="bg-[var(--bg-primary)] p-3 rounded"><p className="text-xs text-[var(--text-muted)]">Total Presensi</p><p className="font-bold">{presensiAll.length}</p></div>
-                    <div className="bg-[var(--bg-primary)] p-3 rounded"><p className="text-xs text-[var(--text-muted)]">Rata Hadir</p><p className="font-bold">{filteredAnggota.length ? Math.round(filteredAnggota.reduce((acc:any,m:any)=>{ const r=presensiAll.filter(p=>p.nis===m.nis).filter(x=>x.tipe.toLowerCase()==="hadir").length; return acc + (r/(totalRapat||1)); },0)/filteredAnggota.length*100) : 0}%</p></div>
+                    <div className="bg-[var(--bg-primary)] p-3 rounded"><p className="text-xs text-[var(--text-muted)]">Total Rapat{!filterBulan ? "" : ` (${labelPeriode()})`}</p><p className="font-bold">{totalRapat}</p></div>
+                    <div className="bg-[var(--bg-primary)] p-3 rounded"><p className="text-xs text-[var(--text-muted)]">Total Presensi</p><p className="font-bold">{presensiTersaring.length}</p></div>
+                    <div className="bg-[var(--bg-primary)] p-3 rounded"><p className="text-xs text-[var(--text-muted)]">Rata Hadir</p><p className="font-bold">{filteredAnggota.length ? Math.round(filteredAnggota.reduce((acc:any,m:any)=>{ const r=presensiTersaring.filter(p=>p.nis===m.nis).filter(x=>x.tipe.toLowerCase()==="hadir").length; return acc + (r/(totalRapat||1)); },0)/filteredAnggota.length*100) : 0}%</p></div>
                   </div>
                 </div>
               );
@@ -281,10 +333,12 @@ export default function AttendancePage() {
           </div>
           {/* Rekap Terpisah per Rapat */}
           <div className="glass-card p-6">
-            <h4 className="font-semibold text-sm mb-3">Rekap Terpisah per Rapat</h4>
-            {meetings.length===0 ? <p className="text-xs text-[var(--text-muted)]">Belum ada rapat.</p> :
+            <h4 className="font-semibold text-sm mb-3">
+              Rekap Terpisah per Rapat{!filterBulan ? "" : ` — ${labelPeriode()}`}
+            </h4>
+            {rapatTersaring.length===0 ? <p className="text-xs text-[var(--text-muted)]">Belum ada rapat{!filterBulan ? "" : ` pada ${labelPeriode()}`}.</p> :
             <div className="space-y-3">
-              {meetings.slice(0,5).map((rap)=> {
+              {rapatTersaring.slice(0,5).map((rap)=> {
                 const list = presensiAll.filter(p=>p.acara_id===rap.rapat_id);
                 const hadir = list.filter(p=>p.tipe.toLowerCase()==="hadir").length;
                 const izin = list.filter(p=>p.tipe.toLowerCase()==="izin").length;
@@ -303,7 +357,7 @@ export default function AttendancePage() {
                   </div>
                 );
               })}
-              {meetings.length>5 && <p className="text-xs text-[var(--text-muted)]">+ {meetings.length-5} rapat lain.</p>}
+              {rapatTersaring.length>5 && <p className="text-xs text-[var(--text-muted)]">+ {rapatTersaring.length-5} rapat lain.</p>}
             </div>
             }
           </div>
