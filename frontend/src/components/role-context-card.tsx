@@ -34,7 +34,9 @@ export default function RoleContextCard({ title = "Ruang kerja kamu" }: { title?
           <p className="mt-1 text-sm text-slate-400">{descriptions[group]}</p>
         </div>
         <div className="flex items-center gap-3">
-          <span className="rounded-full border border-slate-700 bg-slate-900/50 px-3 py-1.5 text-xs font-medium text-slate-300">{scope}</span>
+          {group !== "Pembina" && (
+            <span className="rounded-full border border-slate-700 bg-slate-900/50 px-3 py-1.5 text-xs font-medium text-slate-300">{scope}</span>
+          )}
           <Link href={links[group]} className="rounded-xl bg-blue-500 px-4 py-2 text-xs font-bold text-white transition hover:bg-blue-400">Buka ruang kerja</Link>
         </div>
       </div>

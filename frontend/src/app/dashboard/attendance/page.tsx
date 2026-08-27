@@ -19,6 +19,7 @@ export default function AttendancePage() {
   const [scanLoading, setScanLoading] = useState(false);
   const [msg, setMsg] = useState<string>("");
 
+  const isPembina = user?.group_name === "Pembina";
   const fetchData = async () => {
     setLoading(true);
     try {
@@ -73,6 +74,13 @@ export default function AttendancePage() {
 
   useEffect(() => { if (user) fetchData(); }, [user]);
 
+  // Untuk Pembina, default tampilkan rekap bukan pribadi
+  useEffect(() => {
+    if (user?.group_name === "Pembina") {
+      setActiveTab("rekap");
+    }
+  }, [user]);
+
   const personalRecords = presensiAll.filter((p) => p.nis === user?.nis);
   const stats = {
     hadir: personalRecords.filter((p) => p.tipe.toLowerCase() === "hadir").length,
@@ -81,12 +89,13 @@ export default function AttendancePage() {
     alpa: personalRecords.filter((p) => p.tipe.toLowerCase() === "alpa").length,
   };
 
-  // Riwayat absen hanya untuk Trimitra dan BPH (BPH = Sekretaris + Bendahara) — sesuai request
+  // Riwayat absen hanya untuk Trimitra, BPH (Sekretaris + Bendahara), dan Pembina
   const isTrimitra = user?.group_name === "Trimitra";
   const isBPH = user?.group_name === "Sekretaris" || user?.group_name === "Bendahara";
-  const canSeeRekap = isTrimitra || isBPH;
+  const canSeeRekap = isTrimitra || isBPH || isPembina;
 
   const rekapTitle =
+    isPembina ? "Rekap Organisasi — Seluruh Anggota (Pembina)" :
     isTrimitra ? "Rekap Lintas Divisi (Trimitra)" :
     isBPH ? "Rekap Organisasi (BPH)" :
     "Rekap";
@@ -129,13 +138,13 @@ export default function AttendancePage() {
       </div>
 
       <div className="flex gap-2 border-b border-[var(--border)] overflow-x-auto">
-        <button onClick={() => setActiveTab("pribadi")} className={`px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap ${activeTab==="pribadi" ? "border-[var(--accent)] text-[var(--accent)]" : "border-transparent text-[var(--text-muted)]"}`}>Presensi Pribadi</button>
+        {!isPembina && <button onClick={() => setActiveTab("pribadi")} className={`px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap ${activeTab==="pribadi" ? "border-[var(--accent)] text-[var(--accent)]" : "border-transparent text-[var(--text-muted)]"}`}>Presensi Pribadi</button>}
         {canSeeRekap && <button onClick={() => setActiveTab("rekap")} className={`px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap ${activeTab==="rekap" ? "border-[var(--accent)] text-[var(--accent)]" : "border-transparent text-[var(--text-muted)]"}`}>{rekapTitle}</button>}
         {canSeeRekap && <button onClick={() => setActiveTab("gabungan")} className={`px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap ${activeTab==="gabungan" ? "border-[var(--accent)] text-[var(--accent)]" : "border-transparent text-[var(--text-muted)]"} flex items-center gap-1`}>📊 Rekap Gabungan <span className="badge badge-info text-[10px]">{anggotaAll.length}</span></button>}
         <button onClick={() => setActiveTab("scan")} className={`px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap ${activeTab==="scan" ? "border-[var(--accent)] text-[var(--accent)]" : "border-transparent text-[var(--text-muted)]"}`}>Scan QR / Izin</button>
       </div>
 
-      {activeTab === "pribadi" && (
+      {activeTab === "pribadi" && !isPembina && (
         <div className="space-y-4">
           <div className="grid grid-cols-4 gap-3">
             <div className="card p-4 text-center"><p className="text-2xl font-bold text-green-500">{stats.hadir}</p><p className="text-xs text-[var(--text-muted)] mt-1">Hadir</p></div>

@@ -59,6 +59,7 @@ export default function DashboardPage() {
   const [pendingList, setPendingList] = useState<PendingApproval[]>([]);
   const [meetingList, setMeetingList] = useState<RapatDetail[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pembinaAttendance, setPembinaAttendance] = useState<{ totalAnggota: number; totalRapat: number; totalPresensi: number; hadir: number } | null>(null);
 
   // Approval modal states
   const [actioningId, setActioningId] = useState<number | null>(null);
@@ -162,6 +163,47 @@ export default function DashboardPage() {
     void loadAgendas();
   }, [user]);
 
+  // Fetch rekap attendance khusus Pembina
+  useEffect(() => {
+    const group = getRoleGroup(user);
+    if (group !== "Pembina") return;
+    const loadPembinaRekap = async () => {
+      try {
+        const [uRes, mRes] = await Promise.allSettled([api.listUsers(), api.listMeetings()]);
+        const totalAnggota = uRes.status === "fulfilled" && Array.isArray((uRes.value as any).users) ? (uRes.value as any).users.length : 0;
+        const totalRapat = mRes.status === "fulfilled" && Array.isArray((mRes.value as any).rapat) ? (mRes.value as any).rapat.length : meetingList.length;
+        // presensi dari localStorage + pending
+        let totalPresensi = 0;
+        let hadir = 0;
+        if (typeof window !== "undefined") {
+          try {
+            const raw = localStorage.getItem("canopy_local_presensi");
+            if (raw) {
+              const arr = JSON.parse(raw) as any[];
+              totalPresensi = arr.length;
+              hadir = arr.filter((p: any) => String(p.tipe).toLowerCase() === "hadir").length;
+            }
+          } catch {}
+        }
+        // try fetch menunggu as additional count if backend available
+        try {
+          const w = await api.listPresensiMenunggu();
+          if (w?.presensi) {
+            // merge if not already counted (approx)
+            if (totalPresensi === 0) {
+              totalPresensi = w.presensi.length;
+              hadir = w.presensi.filter((p: any) => String(p.tipe).toLowerCase() === "hadir").length;
+            }
+          }
+        } catch {}
+        setPembinaAttendance({ totalAnggota, totalRapat, totalPresensi, hadir });
+      } catch {
+        // silent
+      }
+    };
+    void loadPembinaRekap();
+  }, [user, meetingList.length]);
+
   const handleApprovalAction = async (
     id: number,
     keputusan: string,
@@ -213,7 +255,7 @@ export default function DashboardPage() {
   const selectedAgendas = agendas.filter((a) => a.startDate === currentSelectedDateStr);
   const roleGroup = getRoleGroup(user);
   const showFinanceCard = roleGroup === "Bendahara" || roleGroup === "Trimitra";
-  const showApprovalCard = roleGroup === "Sekretaris" || roleGroup === "Bendahara" || roleGroup === "Trimitra";
+  const showApprovalCard = roleGroup === "Sekretaris" || roleGroup === "Bendahara" || roleGroup === "Trimitra" || roleGroup === "Pembina";
   const roleSummary = roleGroup === "Staf"
     ? "Tugas personal, jadwal rapat, dan pengumuman divisi."
     : roleGroup === "Kepala Divisi"
@@ -338,11 +380,52 @@ export default function DashboardPage() {
               </div>
               <p className="text-[11px] text-slate-400 mt-1">Belum Ada Kas Masuk</p>
             </div>
-           </Link> : <div className="bg-[#1e293b]/90 border border-slate-700/60 rounded-2xl p-5 shadow-lg">
-             <p className="text-xs font-bold uppercase tracking-wider text-slate-400">KEHADIRAN PRIBADI</p>
-             <p className="mt-3 text-2xl font-extrabold text-emerald-400">—</p>
-             <p className="mt-1 text-[11px] text-slate-400">Rekap presensi periode aktif</p>
-           </div>}
+           </Link> : roleGroup === "Pembina" ? (
+              <Link
+                href="/dashboard/attendance"
+                className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-emerald-500/60 rounded-2xl p-5 shadow-lg hover:shadow-emerald-500/5 transition-all group flex flex-col justify-between space-y-4"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold text-xs">
+                      📊
+                    </div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                      REKAP KEHADIRAN
+                    </span>
+                  </div>
+                  <span className="text-slate-500 group-hover:text-emerald-400 transition-colors text-xs font-bold">→</span>
+                </div>
+                <div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-extrabold text-white">{pembinaAttendance ? `${pembinaAttendance.hadir}/${pembinaAttendance.totalPresensi || pembinaAttendance.totalAnggota || 0}` : "—"}</span>
+                    <span className="text-xs font-semibold text-emerald-400">Hadir</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    {pembinaAttendance
+                      ? `${pembinaAttendance.totalAnggota} anggota • ${pembinaAttendance.totalRapat} rapat • ${pembinaAttendance.totalPresensi} presensi`
+                      : "Rekap absensi seluruh anggota/organisasi"}
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-1">Klik untuk lihat detail rekap</p>
+                </div>
+              </Link>
+            ) : (
+              <Link href="/dashboard/attendance" className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-emerald-500/60 rounded-2xl p-5 shadow-lg hover:shadow-emerald-500/5 transition-all group flex flex-col justify-between space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold text-xs">
+                      ✅
+                    </div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-200">KEHADIRAN PRIBADI</span>
+                  </div>
+                  <span className="text-slate-500 group-hover:text-emerald-400 transition-colors text-xs font-bold">→</span>
+                </div>
+                <div>
+                  <p className="text-2xl font-extrabold text-emerald-400">—</p>
+                  <p className="mt-1 text-[11px] text-slate-400">Rekap presensi periode aktif • Klik untuk detail</p>
+                </div>
+              </Link>
+            )}
 
            {/* Stat Card 4: Total Rapat */}
           <Link
@@ -444,7 +527,15 @@ export default function DashboardPage() {
                           </span>
                         </td>
                         <td className="py-3.5 px-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => handleApprovalAction(doc.persetujuan_id, "Pending")}
+                              disabled={actioningId !== null}
+                              className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold text-[11px] py-1.5 px-3 rounded-lg transition-all cursor-pointer"
+                              title="Tunda keputusan"
+                            >
+                              Pending
+                            </button>
                             <button
                               onClick={() => setShowRevisionModal(doc.persetujuan_id)}
                               disabled={actioningId !== null}
@@ -457,7 +548,7 @@ export default function DashboardPage() {
                               disabled={actioningId !== null}
                               className="bg-[#2563eb] hover:bg-blue-600 text-white font-semibold text-[11px] py-1.5 px-3.5 rounded-lg shadow-sm transition-all cursor-pointer"
                             >
-                              Setujui
+                              Approve
                             </button>
                           </div>
                         </td>
