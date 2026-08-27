@@ -23,8 +23,8 @@ export default function DashboardLayout({
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-[#0f172a] flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
@@ -32,19 +32,19 @@ export default function DashboardLayout({
   if (!user) return null;
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen bg-[#0f172a] text-slate-100">
       {/* Desktop Sidebar — hidden on mobile */}
       <div className="hidden md:block">
         <Sidebar />
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-[#0f172a] text-slate-100">
         {/* Mobile Top Bar */}
         <TopBar />
 
-        <main className="flex-1 overflow-auto pb-20 md:pb-0">
-          <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">{children}</div>
+        <main className="flex-1 overflow-auto pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0">
+          <div className="mx-auto min-h-full max-w-7xl px-4 py-5 sm:px-5 md:p-6 lg:p-8">{children}</div>
         </main>
       </div>
 

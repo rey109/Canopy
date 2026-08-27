@@ -33,6 +33,27 @@ html {
 
 body {
   background: var(--bg-primary);
+  min-width: 320px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, a, input, select, textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 767px) {
+  .btn-primary, .btn-secondary, .btn-danger {
+    min-height: 44px;
+  }
+
+  .input-field {
+    min-height: 46px;
+    font-size: 16px;
+  }
+
+  .table-container {
+    margin-inline: -0.25rem;
+  }
 }
 
 /* Glass card */
@@ -199,6 +220,88 @@ body {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
+}
+
+/* Agenda Add & Delete Animations */
+@keyframes agendaAdd {
+  0% {
+    opacity: 0;
+    transform: scale(0.8) translateY(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes agendaDelete {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.75) translateY(12px);
+  }
+}
+
+@keyframes modalBackdrop {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalPop {
+  0% { opacity: 0; transform: scale(0.92) translateY(12px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.animate-agenda-add {
+  animation: agendaAdd 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-agenda-delete {
+  animation: agendaDelete 0.1s ease-in forwards;
+}
+
+.animate-modal-backdrop {
+  animation: modalBackdrop 0.1s ease-out forwards;
+}
+
+.animate-modal-pop {
+  animation: modalPop 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* SweetAlert Style Pop Animation */
+@keyframes swalPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  80% {
+    transform: scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes swalIconBounce {
+  0% { transform: scale(0); }
+  60% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
+.animate-swal-pop {
+  animation: swalPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+.animate-swal-icon {
+  animation: swalIconBounce 0.5s ease-out forwards;
 }
 
 /* Fade-in animation */

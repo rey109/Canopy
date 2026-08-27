@@ -1934,6 +1934,10 @@ export const api = {
       throw e;
     }
   },
+  generateMeetingQR: (id: number) => request<RapatDetail>(`/rapat/${id}/qr`, { method: "POST" }),
+  updateProkerStatus: (id: number, status: string) => request<{ message: string }>(`/proker/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) }),
+  listNotifications: () => request<{ notifikasi: { notifikasi_id: number; kategori: string; judul: string; pesan: string; link_ref: string; status: string; dibuat_at: string }[] }>("/notifications"),
+  markNotificationRead: (id: number) => request<{ message: string }>(`/notifications/${id}/read`, { method: "POST" }),
 
   // Announcements with resilient storage fallback
   getAnnouncements: async (): Promise<{ pengumuman: PengumumanDetail[] }> => {

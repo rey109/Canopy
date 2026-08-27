@@ -79,13 +79,6 @@ func BuatRapat(ctx context.Context, params *CreateRapatParams) (*RapatDetail, er
 		}
 	}
 
-	// Generate QR code token unik
-	qrBytes := make([]byte, 16)
-	if _, err := rand.Read(qrBytes); err != nil {
-		return nil, &errs.Error{Code: errs.Internal, Message: "gagal generate QR token"}
-	}
-	qrToken := hex.EncodeToString(qrBytes)
-
 	var divID sql.NullInt32
 	if params.DivisionID != nil {
 		divID.Valid = true
@@ -100,11 +93,11 @@ func BuatRapat(ctx context.Context, params *CreateRapatParams) (*RapatDetail, er
 			(periode_id, division_id, judul, tanggal, lokasi, agenda, dibuat_oleh, status, qr_code)
 		VALUES (
 			(SELECT periode_id FROM periode WHERE is_aktif = TRUE LIMIT 1),
-			$1, $2, $3, $4, $5, $6, 'Terjadwal', $7
+			$1, $2, $3, $4, $5, $6, 'Terjadwal', NULL
 		)
 		RETURNING rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
 		          dibuat_oleh, status, qr_code, created_at
-	`, divID, params.Judul, params.Tanggal, params.Lokasi, params.Agenda, string(nis), qrToken).
+	`, divID, params.Judul, params.Tanggal, params.Lokasi, params.Agenda, string(nis)).
 		Scan(
 			&r.RapatID, &r.PeriodeID, &retDivID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
 			&r.DibuatOleh, &r.Status, &retQR, &r.CreatedAt,
@@ -140,6 +133,47 @@ func BuatRapat(ctx context.Context, params *CreateRapatParams) (*RapatDetail, er
 	return &r, nil
 }
 
+//encore:api auth path=/rapat/:id/qr method=POST
+func GenerateQRPresensi(ctx context.Context, id int) (*RapatDetail, error) {
+	ud := auth.Data().(*user.UserData)
+	if ud.GroupName != "Sekretaris" && ud.GroupName != "Trimitra" {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Sekretaris atau Trimitra yang dapat membuat QR presensi"}
+	}
+
+	qrBytes := make([]byte, 16)
+	if _, err := rand.Read(qrBytes); err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: "gagal generate QR token"}
+	}
+	qrToken := hex.EncodeToString(qrBytes)
+
+	var r RapatDetail
+	var divID sql.NullInt32
+	var qr sql.NullString
+	err := db.QueryRow(ctx, `
+		UPDATE rapat SET qr_code = $1
+		WHERE rapat_id = $2
+		RETURNING rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
+		          dibuat_oleh, status, qr_code, created_at
+	`, qrToken, id).Scan(
+		&r.RapatID, &r.PeriodeID, &divID, &r.Judul, &r.Tanggal, &r.Lokasi, &r.Agenda,
+		&r.DibuatOleh, &r.Status, &qr, &r.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &errs.Error{Code: errs.NotFound, Message: "rapat tidak ditemukan"}
+		}
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if divID.Valid {
+		v := int(divID.Int32)
+		r.DivisionID = &v
+	}
+	if qr.Valid {
+		r.QRCode = &qr.String
+	}
+	return &r, nil
+}
+
 //encore:api auth path=/rapat method=GET
 func ListRapat(ctx context.Context) (*ListRapatResponse, error) {
 	ud := auth.Data().(*user.UserData)
@@ -152,19 +186,21 @@ func ListRapat(ctx context.Context) (*ListRapatResponse, error) {
 	if ud.HasScopeAll() {
 		rows, err = db.Query(ctx, `
 			SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
-			       dibuat_oleh, status, NULL AS qr_code, created_at
+			       dibuat_oleh, status,
+			       CASE WHEN $1 IN ('Sekretaris', 'Trimitra') THEN qr_code ELSE NULL END AS qr_code,
+			       created_at
 			FROM rapat ORDER BY tanggal DESC
-		`)
+		`, ud.GroupName)
 	} else {
 		rows, err = db.Query(ctx, `
 			SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
 			       dibuat_oleh, status,
-			       CASE WHEN dibuat_oleh = $1 THEN qr_code ELSE NULL END AS qr_code,
+			       CASE WHEN $3 IN ('Sekretaris', 'Trimitra') OR dibuat_oleh = $1 THEN qr_code ELSE NULL END AS qr_code,
 			       created_at
 			FROM rapat
 			WHERE division_id IS NULL OR division_id = $2
 			ORDER BY tanggal DESC
-		`, string(nisStr), ud.DivisionID)
+		`, string(nisStr), ud.DivisionID, ud.GroupName)
 	}
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
@@ -189,10 +225,10 @@ func GetRapat(ctx context.Context, id int) (*RapatDetail, error) {
 	row := db.QueryRow(ctx, `
 		SELECT rapat_id, periode_id, division_id, judul, tanggal, lokasi, agenda,
 		       dibuat_oleh, status,
-		       CASE WHEN dibuat_oleh = $1 THEN qr_code ELSE NULL END AS qr_code,
+		       CASE WHEN $3 IN ('Sekretaris', 'Trimitra') THEN qr_code ELSE NULL END AS qr_code,
 		       created_at
 		FROM rapat WHERE rapat_id = $2
-	`, string(nisStr), id)
+	`, string(nisStr), id, auth.Data().(*user.UserData).GroupName)
 	r, err := scanRapat(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -232,9 +268,9 @@ func UpdateRapat(ctx context.Context, id int, params *UpdateRapatParams) (*Rapat
 	}
 
 	canEdit := false
-	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" || ud.GroupName == "Pembina" {
+	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" {
 		canEdit = true
-	} else if string(nisStr) == dibuatOleh {
+	} else if string(nisStr) == dibuatOleh && ud.GroupName != "Pembina" && ud.GroupName != "Staf" {
 		canEdit = true
 	} else if ud.GroupName == "Kepala Divisi" && divID.Valid && ud.DivisionID != nil && int(divID.Int32) == *ud.DivisionID {
 		canEdit = true
@@ -328,9 +364,9 @@ func HapusRapat(ctx context.Context, id int) (*MessageResponse, error) {
 	}
 
 	canDelete := false
-	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" || ud.GroupName == "Pembina" {
+	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" {
 		canDelete = true
-	} else if string(nisStr) == dibuatOleh {
+	} else if string(nisStr) == dibuatOleh && ud.GroupName != "Pembina" && ud.GroupName != "Staf" {
 		canDelete = true
 	} else if ud.GroupName == "Kepala Divisi" && divID.Valid && ud.DivisionID != nil && int(divID.Int32) == *ud.DivisionID {
 		canDelete = true
@@ -456,14 +492,6 @@ func UpsertNotulensi(ctx context.Context, id int, params *UpsertNotulensiParams)
 //encore:api auth path=/rapat/:id/notulensi/finalisasi method=POST
 func FinalisasiNotulensi(ctx context.Context, id int) (*NotulensiDetail, error) {
 	nis, _ := auth.UserID()
-	ud := auth.Data().(*user.UserData)
-
-	if ud.GroupName != "Sekretaris" || ud.Level != 1 {
-		return nil, &errs.Error{
-			Code:    errs.PermissionDenied,
-			Message: "hanya Sekretaris Umum (level 1) yang dapat memfinalisasi notulensi",
-		}
-	}
 
 	var n NotulensiDetail
 	var retFinalisasi sql.NullString
@@ -867,11 +895,6 @@ type RapatMessageResponse struct {
 
 //encore:api auth path=/rapat/:id/presensi method=POST
 func RecordAttendance(ctx context.Context, id int, params *RecordAttendanceParams) (*RapatMessageResponse, error) {
-	ud := auth.Data().(*user.UserData)
-	if ud.GroupName != "Sekretaris" && ud.GroupName != "Trimitra" && ud.GroupName != "Pembina" {
-		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Sekretaris, Trimitra atau Pembina"}
-	}
-
 	for _, entry := range params.Entries {
 		status := "Alpa"
 		switch entry.Status {
@@ -981,6 +1004,114 @@ func ListPresensiMenunggu(ctx context.Context) (*ListPresensiResponse, error) {
 		list = append(list, *p)
 	}
 	return &ListPresensiResponse{Presensi: list}, nil
+}
+
+// ============================================================
+// PRESENSI — Riwayat absensi per rapat
+// ============================================================
+
+type RiwayatPresensiItem struct {
+	RapatID        int               `json:"rapat_id"`
+	Judul          string            `json:"judul"`
+	Tanggal        time.Time         `json:"tanggal"`
+	Lokasi         string            `json:"lokasi"`
+	StatusRapat    string            `json:"status_rapat"`
+	TotalHadir     int               `json:"total_hadir"`
+	TotalIzin      int               `json:"total_izin"`
+	TotalSakit     int               `json:"total_sakit"`
+	TotalAlpa      int               `json:"total_alpa"`
+	TotalPeserta   int               `json:"total_peserta"`
+	Details        []RiwayatDetailItem `json:"details"`
+}
+
+type RiwayatDetailItem struct {
+	NIS        string `json:"nis"`
+	Nama       string `json:"nama"`
+	Tipe       string `json:"tipe"`
+	Keterangan string `json:"keterangan"`
+}
+
+type ListRiwayatResponse struct {
+	Riwayat []RiwayatPresensiItem `json:"riwayat"`
+}
+
+// RiwayatPresensi — daftar riwayat kehadiran seluruh rapat yang terlihat user
+//encore:api auth path=/presensi/riwayat method=GET
+func RiwayatPresensi(ctx context.Context) (*ListRiwayatResponse, error) {
+	ud := auth.Data().(*user.UserData)
+
+	baseQuery := `
+		SELECT r.rapat_id, r.judul, r.tanggal, r.lokasi, r.status
+		FROM rapat r
+	`
+	var rows *sqldb.Rows
+	var err error
+	if ud.HasScopeAll() {
+		rows, err = db.Query(ctx, baseQuery+` ORDER BY r.tanggal DESC`)
+	} else if ud.DivisionID != nil {
+		rows, err = db.Query(ctx, baseQuery+`
+			WHERE r.division_id IS NULL OR r.division_id = $1
+			ORDER BY r.tanggal DESC
+		`, *ud.DivisionID)
+	} else {
+		rows, err = db.Query(ctx, baseQuery+`
+			WHERE r.division_id IS NULL
+			ORDER BY r.tanggal DESC
+		`)
+	}
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	defer rows.Close()
+
+	var riwayatList []RiwayatPresensiItem
+	for rows.Next() {
+		var item RiwayatPresensiItem
+		if err := rows.Scan(&item.RapatID, &item.Judul, &item.Tanggal, &item.Lokasi, &item.StatusRapat); err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+
+		presensiRows, err := db.Query(ctx, `
+			SELECT p.nis, COALESCE(u.nama, p.nis), p.tipe, COALESCE(p.keterangan, '')
+			FROM presensi p
+			LEFT JOIN users u ON u.nis = p.nis
+			WHERE p.acara_type = 'Rapat' AND p.acara_id = $1
+			ORDER BY u.nama ASC
+		`, item.RapatID)
+		if err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+
+		for presensiRows.Next() {
+			var d RiwayatDetailItem
+			if err := presensiRows.Scan(&d.NIS, &d.Nama, &d.Tipe, &d.Keterangan); err != nil {
+				presensiRows.Close()
+				return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+			}
+			switch d.Tipe {
+			case "Hadir":
+				item.TotalHadir++
+			case "Izin":
+				item.TotalIzin++
+			case "Sakit":
+				item.TotalSakit++
+			default:
+				item.TotalAlpa++
+			}
+			item.TotalPeserta++
+			item.Details = append(item.Details, d)
+		}
+		presensiRows.Close()
+
+		if item.Details == nil {
+			item.Details = []RiwayatDetailItem{}
+		}
+		riwayatList = append(riwayatList, item)
+	}
+	if riwayatList == nil {
+		riwayatList = []RiwayatPresensiItem{}
+	}
+	return &ListRiwayatResponse{Riwayat: riwayatList}, nil
 }
 
 // ============================================================

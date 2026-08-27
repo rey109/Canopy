@@ -16,6 +16,10 @@ export default function NotulensiPage() {
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState<NotulensiListItem | null>(null);
 
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editIsi, setEditIsi] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+
   const fetchNotulensi = async () => {
     setLoading(true);
     setError(null);
@@ -32,6 +36,38 @@ export default function NotulensiPage() {
   useEffect(() => {
     if (user) fetchNotulensi();
   }, [user]);
+
+  const handleStartEdit = (n: NotulensiListItem) => {
+    setEditingId(n.rapat_id);
+    setEditIsi(n.isi || "");
+  };
+
+  const handleSaveEdit = async (rapatId: number) => {
+    setEditSaving(true);
+    try {
+      const detailRes = await api.getNotulensi(rapatId);
+      await api.upsertNotulensi(rapatId, editIsi, detailRes.attachments || []);
+      alert("Notulensi berhasil disimpan!");
+      setEditingId(null);
+      fetchNotulensi();
+    } catch (err: any) {
+      alert("Gagal menyimpan: " + err.message);
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleFinalisasi = async (rapatId: number) => {
+    if (!confirm("Yakin ingin finalisasi notulensi? Setelah Final, status tidak bisa diubah kembali.")) return;
+    try {
+      await api.finalisasiNotulensi(rapatId);
+      alert("Notulensi berhasil difinalisasi!");
+      setDetail(null);
+      fetchNotulensi();
+    } catch (err: any) {
+      alert("Gagal finalisasi: " + err.message);
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -250,9 +286,29 @@ export default function NotulensiPage() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
                   Isi Notulensi
                 </p>
-                <div className="p-4 rounded-xl bg-[var(--bg-primary)] border border-[var(--border)] text-sm whitespace-pre-line leading-relaxed">
-                  {detail.isi || "(notulensi belum diisi)"}
-                </div>
+                {editingId === detail.rapat_id ? (
+                  <textarea
+                    value={editIsi}
+                    onChange={(e) => setEditIsi(e.target.value)}
+                    rows={10}
+                    className="w-full p-4 rounded-xl bg-[var(--bg-primary)] border border-[var(--accent)]/40 text-sm whitespace-pre-line leading-relaxed resize-y focus:outline-none focus:border-[var(--accent)]"
+                    placeholder="Tulis isi notulensi..."
+                  />
+                ) : (
+                  <div className="p-4 rounded-xl bg-[var(--bg-primary)] border border-[var(--border)] text-sm whitespace-pre-line leading-relaxed">
+                    {detail.isi || "(notulensi belum diisi)"}
+                  </div>
+                )}
+                {editingId === detail.rapat_id && (
+                  <div className="flex justify-end gap-2 mt-2">
+                    <button onClick={() => setEditingId(null)} className="btn-secondary text-xs" disabled={editSaving}>
+                      Batal
+                    </button>
+                    <button onClick={() => handleSaveEdit(detail.rapat_id)} className="btn-primary text-xs" disabled={editSaving}>
+                      {editSaving ? "Menyimpan..." : "Simpan Perubahan"}
+                    </button>
+                  </div>
+                )}
               </div>
 
               {(detail.attachments?.length || 0) > 0 && (
@@ -295,14 +351,23 @@ export default function NotulensiPage() {
             </div>
 
             <div className="flex justify-end gap-2 pt-4 border-t border-[var(--border)] flex-shrink-0">
-              <Link
-                href="/dashboard/meetings"
-                className="btn-secondary text-xs"
-                onClick={() => setDetail(null)}
-              >
-                Edit Notulensi
-              </Link>
-              <button onClick={() => setDetail(null)} className="btn-primary text-xs">
+              {detail.status !== "Final" && editingId !== detail.rapat_id && (
+                <button
+                  onClick={() => { setDetail(null); handleStartEdit(detail); }}
+                  className="btn-secondary text-xs"
+                >
+                  ✏️ Edit
+                </button>
+              )}
+              {detail.status !== "Final" && (
+                <button
+                  onClick={() => handleFinalisasi(detail.rapat_id)}
+                  className="btn-primary text-xs"
+                >
+                  ✅ Finalisasi
+                </button>
+              )}
+              <button onClick={() => setDetail(null)} className="btn-secondary text-xs">
                 Tutup
               </button>
             </div>

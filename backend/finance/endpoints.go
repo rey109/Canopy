@@ -830,14 +830,8 @@ func VerifikasiBukti(ctx context.Context, id int, params *VerifikasiParams) (*Tr
 //encore:api auth path=/finance/transaksi/:id/approval-berisiko method=POST
 func ApprovalBerisiko(ctx context.Context, id int, params *VerifikasiParams) (*TransaksiDetail, error) {
 	ud := auth.Data().(*user.UserData)
-	if ud.GroupName != "Bendahara" && ud.GroupName != "Trimitra" {
-		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Bendahara atau Trimitra"}
-	}
-	if ud.GroupName == "Bendahara" && ud.Level != 1 {
-		return nil, &errs.Error{
-			Code:    errs.PermissionDenied,
-			Message: "hanya Bendahara Umum (level 1) yang dapat menyetujui transaksi berisiko",
-		}
+	if ud.GroupName != "Bendahara" || ud.Level != 1 {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Bendahara Umum yang dapat menyetujui transaksi berisiko"}
 	}
 	var currentStatus string
 	err := db.QueryRow(ctx, `SELECT status FROM transaksi WHERE transaksi_id = $1`, id).Scan(&currentStatus)
@@ -876,8 +870,8 @@ func ApprovalBerisiko(ctx context.Context, id int, params *VerifikasiParams) (*T
 //encore:api auth path=/finance/antrian-verifikasi method=GET
 func ListMenungguVerifikasi(ctx context.Context) (*ListTransaksiResponse, error) {
 	ud := auth.Data().(*user.UserData)
-	if ud.GroupName != "Bendahara" && ud.GroupName != "Trimitra" {
-		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Bendahara atau Trimitra"}
+	if ud.GroupName != "Bendahara" {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Bendahara yang dapat memverifikasi nota"}
 	}
 	rows, err := db.Query(ctx, `
 		SELECT t.transaksi_id, t.proker_id, t.kategori_id, k.nama,
@@ -914,8 +908,8 @@ func ListMenungguVerifikasi(ctx context.Context) (*ListTransaksiResponse, error)
 //encore:api auth path=/finance/antrian-berisiko method=GET
 func ListMenungguApprovalBerisiko(ctx context.Context) (*ListTransaksiResponse, error) {
 	ud := auth.Data().(*user.UserData)
-	if ud.GroupName != "Bendahara" && ud.GroupName != "Trimitra" {
-		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Bendahara atau Trimitra"}
+	if ud.GroupName != "Bendahara" || ud.Level != 1 {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Bendahara Umum yang dapat melihat approval berisiko"}
 	}
 	rows, err := db.Query(ctx, `
 		SELECT t.transaksi_id, t.proker_id, t.kategori_id, k.nama,

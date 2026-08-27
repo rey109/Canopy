@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+import { canManageSecretariat } from "@/lib/role-access";
 
 interface Aspiration {
   id: number;
@@ -27,6 +29,8 @@ const statusBadge: Record<string, string> = {
 };
 
 export default function PublicPage() {
+  const { user } = useAuth();
+  const canManage = canManageSecretariat(user) || user?.group_name === "Trimitra";
   const [aspirations, setAspirations] = useState<Aspiration[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
@@ -113,8 +117,8 @@ export default function PublicPage() {
                       {new Date(a.created_at).toLocaleDateString("id-ID")}
                     </span>
                   </div>
-                  <div className="flex gap-2">
-                    <button
+                     {canManage && <div className="flex gap-2">
+                     <button
                       onClick={() => handleUpdateStatus(a.id, "Diproses")}
                       className="btn-secondary text-xs py-1 px-2.5"
                     >
@@ -126,9 +130,9 @@ export default function PublicPage() {
                     >
                       Selesai
                     </button>
-                  </div>
-                </div>
-                <p className="text-sm text-[var(--text-primary)] leading-relaxed">{a.content}</p>
+                   </div>}
+                 </div>
+                 <p className="text-sm text-[var(--text-primary)] leading-relaxed">{a.content}</p>
                 <div className="mt-3 text-xs text-[var(--text-muted)]">
                   Pengirim: {a.is_anonymous ? "Anonim (Siswa Umum)" : a.user_nis || "Siswa Umum"}
                 </div>

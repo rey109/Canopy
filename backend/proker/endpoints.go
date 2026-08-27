@@ -53,6 +53,24 @@ type ListProkerResponse struct {
 //encore:api auth path=/proker method=POST
 func CreateProker(ctx context.Context, params *CreateProkerParams) (*ProkerDetail, error) {
 	nis, _ := auth.UserID()
+	ud := auth.Data().(*user.UserData)
+
+	if ud.GroupName != "Kepala Divisi" && ud.GroupName != "Trimitra" {
+		return nil, &errs.Error{
+			Code:    errs.PermissionDenied,
+			Message: "hanya Kepala Divisi atau Trimitra yang dapat membuat proker",
+		}
+	}
+
+	// Kepala Divisi hanya boleh membuat proker untuk divisinya sendiri
+	if ud.GroupName == "Kepala Divisi" {
+		if params.DivisionID == nil || ud.DivisionID == nil || *params.DivisionID != *ud.DivisionID {
+			return nil, &errs.Error{
+				Code:    errs.PermissionDenied,
+				Message: "Kepala Divisi hanya dapat membuat proker untuk divisinya sendiri",
+			}
+		}
+	}
 
 	var divID, pj sql.NullInt32
 	var pjStr sql.NullString
@@ -102,6 +120,7 @@ func CreateProker(ctx context.Context, params *CreateProkerParams) (*ProkerDetai
 
 //encore:api auth path=/proker/:id method=GET
 func GetProker(ctx context.Context, id int) (*ProkerDetail, error) {
+	ud := auth.Data().(*user.UserData)
 	var p ProkerDetail
 	var retDivID sql.NullInt32
 	var retPJ sql.NullString
@@ -127,6 +146,15 @@ func GetProker(ctx context.Context, id int) (*ProkerDetail, error) {
 	}
 	if retPJ.Valid {
 		p.PenanggungJawab = &retPJ.String
+	}
+	if ud.GroupName == "Staf" && p.DivisionID != nil && ud.DivisionID != nil && *p.DivisionID != *ud.DivisionID {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "proker berada di luar divisi kamu"}
+	}
+	if ud.GroupName == "Kepala Divisi" && (p.DivisionID == nil || ud.DivisionID == nil || *p.DivisionID != *ud.DivisionID) {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "proker berada di luar scope divisi kamu"}
+	}
+	if ud.GroupName == "Trimitra" && !ud.HasScopeAll() && p.DivisionID != nil && !ud.InScope(*p.DivisionID) {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "proker berada di luar scope kamu"}
 	}
 	return &p, nil
 }
@@ -520,11 +548,22 @@ func CreateTask(ctx context.Context, params *CreateTaskParams) (*TaskDetail, err
 	nis, _ := auth.UserID()
 	ud := auth.Data().(*user.UserData)
 
-	if ud.GroupName == "Pembina" {
+	if ud.GroupName != "Kepala Divisi" && ud.GroupName != "Trimitra" {
 		return nil, &errs.Error{
 			Code:    errs.PermissionDenied,
-			Message: "Pembina tidak dapat membuat task",
+			Message: "hanya Kepala Divisi atau Trimitra yang dapat membuat task",
 		}
+	}
+
+	var prokerDivision sql.NullInt32
+	if err := db.QueryRow(ctx, "SELECT division_id FROM program_kerja WHERE proker_id = $1", params.ProkerID).Scan(&prokerDivision); err != nil {
+		return nil, &errs.Error{Code: errs.NotFound, Message: "proker tidak ditemukan"}
+	}
+	if ud.GroupName == "Kepala Divisi" && (!prokerDivision.Valid || ud.DivisionID == nil || int(prokerDivision.Int32) != *ud.DivisionID) {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "task hanya boleh dibuat di proker divisi sendiri"}
+	}
+	if ud.GroupName == "Trimitra" && !ud.HasScopeAll() && prokerDivision.Valid && !ud.InScope(int(prokerDivision.Int32)) {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "task berada di luar scope kamu"}
 	}
 
 	validScope := map[string]bool{"Individual": true, "General": true}
@@ -621,14 +660,16 @@ func ListTasks(ctx context.Context) (*ListTasksResponse, error) {
 			WHERE pk.division_id = $1
 			ORDER BY t.deadline ASC
 		`, ud.DivisionID)
+	case "Trimitra":
+		if ud.HasScopeAll() {
+			rows, err = db.Query(ctx, `SELECT task_id, proker_id, template_id, scope, assigned_to, offered_by, dibuat_oleh, judul, deskripsi, deadline, status, custom_data, eskalasi_terkirim, created_at FROM tasks ORDER BY deadline ASC`)
+		} else {
+			rows, err = db.Query(ctx, `SELECT t.task_id, t.proker_id, t.template_id, t.scope, t.assigned_to, t.offered_by, t.dibuat_oleh, t.judul, t.deskripsi, t.deadline, t.status, t.custom_data, t.eskalasi_terkirim, t.created_at FROM tasks t JOIN program_kerja pk ON pk.proker_id = t.proker_id WHERE pk.division_id IS NULL OR pk.division_id BETWEEN $1 AND $2 ORDER BY t.deadline ASC`, ud.ScopeDivisiAwal, ud.ScopeDivisiAkhir)
+		}
+	case "Sekretaris", "Bendahara":
+		rows, err = db.Query(ctx, `SELECT t.task_id, t.proker_id, t.template_id, t.scope, t.assigned_to, t.offered_by, t.dibuat_oleh, t.judul, t.deskripsi, t.deadline, t.status, t.custom_data, t.eskalasi_terkirim, t.created_at FROM tasks t JOIN program_kerja pk ON pk.proker_id = t.proker_id WHERE pk.division_id IS NULL OR pk.division_id BETWEEN $1 AND $2 ORDER BY t.deadline ASC`, ud.ScopeDivisiAwal, ud.ScopeDivisiAkhir)
 	default:
-		// Trimitra, Sekretaris, Bendahara, Pembina — semua task
-		rows, err = db.Query(ctx, `
-			SELECT task_id, proker_id, template_id, scope, assigned_to,
-			       offered_by, dibuat_oleh, judul, deskripsi, deadline,
-			       status, custom_data, eskalasi_terkirim, created_at
-			FROM tasks ORDER BY deadline ASC
-		`)
+		rows, err = db.Query(ctx, `SELECT task_id, proker_id, template_id, scope, assigned_to, offered_by, dibuat_oleh, judul, deskripsi, deadline, status, custom_data, eskalasi_terkirim, created_at FROM tasks ORDER BY deadline ASC`)
 	}
 	if err != nil {
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
@@ -683,6 +724,11 @@ func TawarkanTask(ctx context.Context, id int) (*TaskDetail, error) {
 //encore:api auth path=/task/:id/ambil method=POST
 func AmbilTask(ctx context.Context, id int) (*TaskDetail, error) {
 	nis, _ := auth.UserID()
+	ud := auth.Data().(*user.UserData)
+
+	var divisionID sql.NullInt32
+	if err := db.QueryRow(ctx, "SELECT pk.division_id FROM tasks t JOIN program_kerja pk ON pk.proker_id = t.proker_id WHERE t.task_id = $1", id).Scan(&divisionID); err != nil { return nil, &errs.Error{Code: errs.NotFound, Message: "task tidak ditemukan"} }
+	if ud.DivisionID != nil && divisionID.Valid && !ud.InScope(int(divisionID.Int32)) { return nil, &errs.Error{Code: errs.PermissionDenied, Message: "task berada di luar scope divisi kamu"} }
 
 	var t TaskDetail
 	var retAssign, retOffered sql.NullString

@@ -283,6 +283,17 @@ export default function MeetingsPage() {
     return false;
   };
 
+  const canGenerateQR = user?.group_name === "Sekretaris" || user?.group_name === "Trimitra";
+
+  const handleGenerateQR = async (m: RapatDetail) => {
+    try {
+      const updated = await api.generateMeetingQR(m.rapat_id);
+      setMeetings((current) => current.map((item) => item.rapat_id === m.rapat_id ? updated : item));
+    } catch (err: any) {
+      alert("Gagal membuat QR presensi: " + err.message);
+    }
+  };
+
   const handleOpenAttendance = async (m: RapatDetail) => {
     setSelectedMeeting(m);
     setAttendanceList([]);
@@ -290,7 +301,21 @@ export default function MeetingsPage() {
       const aRes = await api.listPresensiRapat(m.rapat_id).catch(() => ({ presensi: [] }));
       const current = aRes.presensi || [];
 
-      const populated = userList.map((u) => {
+      const targetInfo = getMeetingTargetInfo(m);
+      const targetLabel = targetInfo.label;
+
+      let filteredUsers = userList;
+      if (targetLabel === "TRIMITRA") {
+        filteredUsers = userList.filter((u) => u.group_name === "Trimitra");
+      } else if (targetLabel === "BPH") {
+        filteredUsers = userList.filter((u) =>
+          ["Trimitra", "Sekretaris", "Bendahara"].includes(u.group_name)
+        );
+      } else if (targetLabel.startsWith("SEKBID ") && m.division_id) {
+        filteredUsers = userList.filter((u) => u.division_id === m.division_id);
+      }
+
+      const populated = filteredUsers.map((u) => {
         const att = current.find((a) => a.nis === u.nis);
         return {
           user_nis: u.nis,
@@ -310,7 +335,7 @@ export default function MeetingsPage() {
     try {
       const entries = attendanceList.map((a) => ({
         user_nis: a.user_nis,
-        status: a.status === "hadir" ? "hadir" : a.status === "izin" ? "izin" : "alfa",
+        status: a.status,
       }));
       await api.recordAttendance(selectedMeeting.rapat_id, { entries });
       alert("Absensi rapat berhasil disimpan!");
@@ -448,6 +473,10 @@ export default function MeetingsPage() {
   };
 
   const isStaf = user?.group_name === "Staf";
+  const isReadOnly = user?.group_name === "Pembina" || isStaf;
+  const canCreateMeeting = !isStaf && user?.group_name !== "Pembina";
+  const canFinalizeNotes = user?.group_name === "Sekretaris" || user?.group_name === "Trimitra";
+  const canManageAttendance = user?.group_name === "Sekretaris" || user?.group_name === "Kepala Divisi";
 
   const filteredMeetings = meetings.filter((m) => {
     if (filterStatus !== "Semua" && m.status !== filterStatus) return false;
@@ -474,7 +503,7 @@ export default function MeetingsPage() {
             Manajemen agenda rapat, jadwal kegiatan, absensi QR, dan notulensi organisasi.
           </p>
         </div>
-        {!isStaf && (
+        {canCreateMeeting && (
           <button onClick={() => setShowModal(true)} className="btn-primary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" />
@@ -583,14 +612,20 @@ export default function MeetingsPage() {
                     </p>
                   </div>
 
-                  {/* QR Code Banner jika tersedia */}
-                  {m.qr_code && (
-                    <div className="p-3 bg-[var(--bg-primary)] rounded-xl border border-[var(--border)] mb-4 flex items-center justify-between">
+                   {/* QR Code Banner jika tersedia */}
+                   {(m.qr_code || canGenerateQR) && (
+                     <div className="p-3 bg-[var(--bg-primary)] rounded-xl border border-[var(--border)] mb-4 flex items-center justify-between">
+
                       <div>
                         <p className="text-[10px] text-[var(--text-muted)] font-semibold uppercase">Token QR Presensi</p>
-                        <p className="text-xs font-mono font-bold text-[var(--accent)] select-all mt-0.5">{m.qr_code}</p>
-                      </div>
-                      <span className="text-xs px-2 py-1 rounded bg-[var(--accent)]/10 text-[var(--accent)] font-semibold">Aktif</span>
+                        {m.qr_code ? (
+                          <p className="text-xs font-mono font-bold text-[var(--accent)] select-all mt-0.5">{m.qr_code}</p>
+                        ) : (
+                          <button onClick={() => handleGenerateQR(m)} className="btn-primary text-xs py-1 px-2">Buat QR</button>
+                        )}
+                       </div>
+                       {m.qr_code && <span className="text-xs px-2 py-1 rounded bg-[var(--accent)]/10 text-[var(--accent)] font-semibold">Aktif</span>}
+
                     </div>
                   )}
                 </div>
@@ -614,12 +649,12 @@ export default function MeetingsPage() {
                         </button>
                       </>
                     )}
-                    <button onClick={() => handleOpenAttendance(m)} className="btn-secondary text-xs py-1.5 px-2.5">
-                      Absensi
-                    </button>
-                    <button onClick={() => handleOpenNotulensi(m)} className="btn-primary text-xs py-1.5 px-2.5">
-                      Notulensi
-                    </button>
+                     {canManageAttendance && <button onClick={() => handleOpenAttendance(m)} className="btn-secondary text-xs py-1.5 px-2.5">
+                       Absensi
+                     </button>}
+                     {(canFinalizeNotes || user?.group_name !== "Staf") && <button onClick={() => handleOpenNotulensi(m)} className="btn-primary text-xs py-1.5 px-2.5">
+                       Notulensi
+                     </button>}
                   </div>
                 </div>
               </div>
@@ -754,7 +789,7 @@ export default function MeetingsPage() {
                         >
                           {att.name}
                         </a>
-                        {notulensiStatus !== "Final" && !isStaf && (
+                        {notulensiStatus !== "Final" && canFinalizeNotes && (
                           <button
                             onClick={() => handleRemoveAttachment(idx)}
                             className="text-[10px] text-red-400 hover:text-red-300 px-1.5 py-1 rounded border border-red-500/30 hover:bg-red-500/10 transition-all flex-shrink-0"

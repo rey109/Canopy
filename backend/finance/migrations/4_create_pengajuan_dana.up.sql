@@ -59,10 +59,17 @@ CREATE INDEX idx_pengajuan_approval_pengajuan ON pengajuan_dana_approval_history
 -- ============================================================
 -- Update transaksi table to add pengajuan_id reference
 -- ============================================================
-ALTER TABLE transaksi
-    ADD COLUMN pengajuan_id INT DEFAULT NULL;
-
-CREATE INDEX idx_transaksi_pengajuan ON transaksi(pengajuan_id);
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'transaksi') THEN
+        ALTER TABLE transaksi
+            ADD COLUMN IF NOT EXISTS pengajuan_id INT DEFAULT NULL;
+        
+        IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'idx_transaksi_pengajuan') THEN
+            CREATE INDEX idx_transaksi_pengajuan ON transaksi(pengajuan_id);
+        END IF;
+    END IF;
+END $$;
 
 -- Add foreign key constraint (optional, cross-service reference)
 -- ALTER TABLE transaksi ADD CONSTRAINT fk_transaksi_pengajuan 

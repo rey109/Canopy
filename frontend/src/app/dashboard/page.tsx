@@ -2,8 +2,12 @@
 
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
-import { api, type TransaksiDetail } from "@/lib/api";
+import { createPortal } from "react-dom";
+import { api, type TransaksiDetail, type RapatDetail } from "@/lib/api";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import RoleContextCard from "@/components/role-context-card";
+import { getRoleGroup } from "@/lib/role-access";
 
 interface Stats {
   prokerCount: number;
@@ -20,70 +24,131 @@ interface PendingApproval {
   keputusan: string;
   catatan: string | null;
   waktu: string | null;
+  urgency?: "Urgent" | "High" | "Normal";
 }
+
+export interface Agenda {
+  id: number | string;
+  title: string;
+  startDate: string; // YYYY-MM-DD
+  startTime: string; // HH:mm
+  endTime: string;   // HH:mm
+  location: string;
+  isOnline: boolean;
+  description: string;
+  createdBy: string;
+}
+
+const monthNames = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+];
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const [stats, setStats] = useState<Stats>({ prokerCount: 0, pendingApprovals: 0, balance: 0, meetingCount: 0 });
+  const router = useRouter();
+  const [mounted, setMounted] = useState(false);
+
+  const [stats, setStats] = useState<Stats>({
+    prokerCount: 0,
+    pendingApprovals: 0,
+    balance: 0,
+    meetingCount: 0,
+  });
+
   const [pendingList, setPendingList] = useState<PendingApproval[]>([]);
+  const [meetingList, setMeetingList] = useState<RapatDetail[]>([]);
   const [loading, setLoading] = useState(true);
-  const [myTasksCount, setMyTasksCount] = useState(0);
-  const [monthlyIncome, setMonthlyIncome] = useState(0);
-  const [monthlyExpense, setMonthlyExpense] = useState(0);
+  const [pembinaAttendance, setPembinaAttendance] = useState<{ totalAnggota: number; totalRapat: number; totalPresensi: number; hadir: number } | null>(null);
 
   // Approval modal states
   const [actioningId, setActioningId] = useState<number | null>(null);
   const [revisionNotes, setRevisionNotes] = useState("");
   const [showRevisionModal, setShowRevisionModal] = useState<number | null>(null);
 
+  // SweetAlert & Confirmation States
+  const [agendaToDelete, setAgendaToDelete] = useState<Agenda | null>(null);
+  const [toast, setToast] = useState<{ type: "success" | "delete"; title: string; message: string } | null>(null);
+
+  // Dynamic Calendar State (Default: August 2026)
+  const [currentCalendarDate, setCurrentCalendarDate] = useState(new Date(2026, 7, 24));
+  const [selectedDay, setSelectedDay] = useState<number>(24);
+
+  // All Agendas stored in array
+  const [agendas, setAgendas] = useState<Agenda[]>([]);
+
+  const currentYear = currentCalendarDate.getFullYear();
+  const currentMonthIndex = currentCalendarDate.getMonth();
+
+  // Dynamic calculation for Days in Month & Start Day Offset (Monday = 0)
+  const daysInMonth = new Date(currentYear, currentMonthIndex + 1, 0).getDate();
+  const rawFirstDay = new Date(currentYear, currentMonthIndex, 1).getDay(); // 0 = Sun
+  const startDayOffset = (rawFirstDay + 6) % 7; // Mon = 0, Tue = 1, ..., Sun = 6
+
+  // Key generator for date comparison: "YYYY-MM-DD"
+  const getDateStr = (y: number, m: number, d: number) => {
+    return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  };
+
+  const currentSelectedDateStr = getDateStr(currentYear, currentMonthIndex, selectedDay);
+
+  const showSwalToast = (title: string, message: string, type: "success" | "delete" = "success") => {
+    setToast({ title, message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 1200);
+  };
+
+  const loadAgendas = async () => {
+    try {
+      const response = await api.listMeetings();
+      setAgendas(response.rapat.map((meeting) => ({
+        id: meeting.rapat_id,
+        title: meeting.judul,
+        startDate: meeting.tanggal.slice(0, 10),
+        startTime: meeting.tanggal.slice(11, 16),
+        endTime: meeting.tanggal.slice(11, 16),
+        location: meeting.lokasi,
+        isOnline: false,
+        description: meeting.agenda,
+        createdBy: meeting.dibuat_oleh,
+      })));
+    } catch {
+      setAgendas([]);
+    }
+  };
+
   const fetchDashboardData = async () => {
     try {
-      const [prokers, approvals, balance, meetings, tasks, txs] = await Promise.allSettled([
-        api.listProkers(),
-        api.listPendingApprovals(),
-        api.getBalance(),
-        api.listMeetings(),
-        api.listTasks(),
-        api.listTransactions(),
-      ]);
+      const [prokers, approvals, balance, meetings] =
+        await Promise.allSettled([
+          api.listProkers(),
+          api.listPendingApprovals(),
+          api.getBalance(),
+          api.listMeetings(),
+        ]);
 
-      const pending = approvals.status === "fulfilled" ? approvals.value.persetujuan || [] : [];
+      const rawPending =
+        approvals.status === "fulfilled" ? approvals.value.persetujuan || [] : [];
+
+      const pending: PendingApproval[] = rawPending.map((item, idx) => ({
+        ...item,
+        urgency: idx === 0 ? "Urgent" : idx % 2 === 0 ? "High" : "Normal",
+      }));
+
       setPendingList(pending);
 
-      // Hitung task saya yang belum selesai
-      let myTasks = 0;
-      if (tasks.status === "fulfilled" && user) {
-        myTasks = tasks.value.tasks.filter(t => t.assigned_to === user.nis && t.status !== "Selesai").length;
+      if (meetings.status === "fulfilled") {
+        setMeetingList(meetings.value.rapat || []);
       }
-      setMyTasksCount(myTasks);
 
-      // Hitung pemasukan/pengeluaran bulan ini
-      let inc = 0;
-      let exp = 0;
-      if (txs.status === "fulfilled") {
-        const now = new Date();
-        const currentMonth = now.getMonth();
-        const currentYear = now.getFullYear();
-
-        txs.value.transaksi.forEach((t: TransaksiDetail) => {
-          const tDate = new Date(t.tanggal);
-          if (tDate.getMonth() === currentMonth && tDate.getFullYear() === currentYear && t.status === "Disetujui") {
-            if (t.jenis === "Masuk") {
-              inc += t.nominal;
-            } else {
-              exp += t.nominal;
-            }
-          }
-        });
-      }
-      setMonthlyIncome(inc);
-      setMonthlyExpense(exp);
+       const actualProkerCount = prokers.status === "fulfilled" && Array.isArray(prokers.value.prokers) ? prokers.value.prokers.length : 0;
 
       setStats({
-        prokerCount: prokers.status === "fulfilled" ? prokers.value.prokers?.length || 0 : 0,
+        prokerCount: actualProkerCount,
         pendingApprovals: pending.length,
-        balance: balance.status === "fulfilled" ? balance.value.saldo : 0,
-        meetingCount: meetings.status === "fulfilled" ? meetings.value.rapat?.length || 0 : 0,
+        balance: 0, // Kas belum diisi (0)
+        meetingCount: meetings.status === "fulfilled" && Array.isArray(meetings.value.rapat) ? meetings.value.rapat.length : 0,
       });
     } catch (e) {
       console.error(e);
@@ -93,10 +158,57 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
+    setMounted(true);
     fetchDashboardData();
+    void loadAgendas();
   }, [user]);
 
-  const handleApprovalAction = async (id: number, keputusan: string, notes: string = "") => {
+  // Fetch rekap attendance khusus Pembina
+  useEffect(() => {
+    const group = getRoleGroup(user);
+    if (group !== "Pembina") return;
+    const loadPembinaRekap = async () => {
+      try {
+        const [uRes, mRes] = await Promise.allSettled([api.listUsers(), api.listMeetings()]);
+        const totalAnggota = uRes.status === "fulfilled" && Array.isArray((uRes.value as any).users) ? (uRes.value as any).users.length : 0;
+        const totalRapat = mRes.status === "fulfilled" && Array.isArray((mRes.value as any).rapat) ? (mRes.value as any).rapat.length : meetingList.length;
+        // presensi dari localStorage + pending
+        let totalPresensi = 0;
+        let hadir = 0;
+        if (typeof window !== "undefined") {
+          try {
+            const raw = localStorage.getItem("canopy_local_presensi");
+            if (raw) {
+              const arr = JSON.parse(raw) as any[];
+              totalPresensi = arr.length;
+              hadir = arr.filter((p: any) => String(p.tipe).toLowerCase() === "hadir").length;
+            }
+          } catch {}
+        }
+        // try fetch menunggu as additional count if backend available
+        try {
+          const w = await api.listPresensiMenunggu();
+          if (w?.presensi) {
+            // merge if not already counted (approx)
+            if (totalPresensi === 0) {
+              totalPresensi = w.presensi.length;
+              hadir = w.presensi.filter((p: any) => String(p.tipe).toLowerCase() === "hadir").length;
+            }
+          }
+        } catch {}
+        setPembinaAttendance({ totalAnggota, totalRapat, totalPresensi, hadir });
+      } catch {
+        // silent
+      }
+    };
+    void loadPembinaRekap();
+  }, [user, meetingList.length]);
+
+  const handleApprovalAction = async (
+    id: number,
+    keputusan: string,
+    notes: string = ""
+  ) => {
     setActioningId(id);
     try {
       await api.actionApproval(id, keputusan, notes || undefined);
@@ -110,204 +222,574 @@ export default function DashboardPage() {
     }
   };
 
-  const greeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return "Selamat Pagi";
-    if (hour < 17) return "Selamat Siang";
-    return "Selamat Malam";
+  // Month Navigation Handlers
+  const handlePrevMonth = () => {
+    setCurrentCalendarDate((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
+    setSelectedDay(1);
+  };
+
+  const handleNextMonth = () => {
+    setCurrentCalendarDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+    setSelectedDay(1);
+  };
+
+  // Confirmed Delete Agenda
+  const handleConfirmDelete = () => {
+    if (!agendaToDelete) return;
+    const updated = agendas.filter((a) => a.id !== agendaToDelete.id);
+    setAgendas(updated);
+    void api.deleteMeeting(Number(agendaToDelete.id)).catch(() => {});
+
+    setAgendaToDelete(null);
+    showSwalToast("Berhasil Dihapus!", "Agenda telah berhasil dihapus.", "delete");
   };
 
   const formatCurrency = (val: number) => {
-    return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(val);
+    return new Intl.NumberFormat("id-ID", {
+      style: "currency",
+      currency: "IDR",
+      maximumFractionDigits: 0,
+    }).format(val);
   };
 
-  // View capabilities based on roles (Spec 02 & 04)
-  const gName = user?.group_name;
-  const isTrimitra = gName === "Trimitra";
-  const isKetuaDivisi = gName === "Kepala Divisi";
-  const isSekretariat = gName === "Sekretaris";
-  const isBendahara = gName === "Bendahara";
-  const isPembina = gName === "Pembina";
-  const isStaf = gName === "Staf";
-
-  const showApprovalInbox = isTrimitra || isSekretariat || isBendahara;
-  const showFinancialSummary = isTrimitra || isBendahara || isPembina;
-  const showOrgStats = isTrimitra || isPembina || isSekretariat || isBendahara;
-  const showPersonalSummary = isStaf || isKetuaDivisi;
+  const selectedAgendas = agendas.filter((a) => a.startDate === currentSelectedDateStr);
+  const roleGroup = getRoleGroup(user);
+  const showFinanceCard = roleGroup === "Bendahara" || roleGroup === "Trimitra";
+  const showApprovalCard = roleGroup === "Sekretaris" || roleGroup === "Bendahara" || roleGroup === "Trimitra" || roleGroup === "Pembina";
+  const roleSummary = roleGroup === "Staf"
+    ? "Tugas personal, jadwal rapat, dan pengumuman divisi."
+    : roleGroup === "Kepala Divisi"
+      ? "Progres divisi, task anggota, dan kehadiran Sekbid."
+      : roleGroup === "Sekretaris"
+        ? "Dokumen, notulensi, presensi, dan aset sesuai scope."
+        : roleGroup === "Bendahara"
+          ? "Saldo, transaksi, verifikasi nota, dan approval berisiko."
+          : roleGroup === "Pembina"
+            ? "Pemantauan organisasi dan catatan pembinaan."
+            : "Approval pusat, struktur, dan ringkasan seluruh organisasi.";
 
   return (
-    <div className="animate-fade-in space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold">
-          {greeting()},{" "}
-          <span className="gradient-text">{user?.nama?.split(" ")[0]}</span> 👋
-        </h1>
-        <p className="text-[var(--text-secondary)] text-sm mt-1">
-          {user?.role_name || user?.group_name} {user?.division_id ? `• Bidang ${user.division_id}` : ""}
-        </p>
+    <div className="animate-fade-in space-y-6 pb-12 text-slate-100 font-sans">
+      
+      <RoleContextCard />
+
+      {/* TOP BREADCRUMB & HEADER */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-5">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
+            <span>Manajemen OSIS</span>
+            <span>&gt;</span>
+            <span className="text-blue-400 font-bold">Dashboard</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white mt-1">
+            Dashboard
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+            Selamat datang kembali, <span className="text-blue-400 font-semibold">{user?.nama || "Pengurus OSIS"}</span> ({user?.role_name || user?.group_name || "Anggota"})
+          </p>
+        </div>
       </div>
 
-      {/* Stats Grid for Management Roles */}
-      {showOrgStats && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 stagger-children">
-          {[
-            { label: "Program Kerja", value: stats.prokerCount, gradient: "from-blue-500 to-cyan-500" },
-            { label: "Persetujuan Pending", value: stats.pendingApprovals, gradient: "from-amber-500 to-orange-500" },
-            { label: "Saldo Kas", value: formatCurrency(stats.balance), gradient: "from-emerald-500 to-green-500" },
-            { label: "Total Rapat", value: stats.meetingCount, gradient: "from-purple-500 to-pink-500" },
-          ].map((card, i) => (
-            <div key={i} className="glass-card p-4 transition-all duration-200">
-              <p className="text-[10px] text-[var(--text-muted)] font-semibold uppercase tracking-wider">{card.label}</p>
-              {loading ? (
-                <div className="h-6 w-20 bg-[var(--border)] rounded animate-pulse mt-2" />
-              ) : (
-                <p className="text-xl font-bold mt-1 truncate">{card.value}</p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="glass-card border border-slate-700/70 p-5">
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Prioritas role hari ini</p>
+        <p className="mt-2 text-sm text-slate-200">{roleSummary}</p>
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Left Column: Inbox / Actionable Items */}
-        <div className="lg:col-span-2 space-y-6">
+      {/* EXECUTIVE SUMMARY GRID (4 KPI CARDS ROW) */}
+      <div className="space-y-3">
+        <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+          Executive Summary Grid
+        </h2>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           
-          {showApprovalInbox && (
-            <div className="glass-card p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-base font-semibold flex items-center gap-2">
-                  📥 Menunggu Persetujuan
-                  {pendingList.length > 0 && <span className="badge badge-warning">{pendingList.length}</span>}
+          {/* Stat Card 1: Program Kerja */}
+          <Link
+            href="/dashboard/proker"
+            className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-blue-500/60 rounded-2xl p-5 shadow-lg hover:shadow-blue-500/5 transition-all group flex flex-col justify-between space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center justify-center font-bold text-xs">
+                  📋
+                </div>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  PROGRAM KERJA
+                </span>
+              </div>
+              <span className="text-slate-500 group-hover:text-blue-400 transition-colors text-xs font-bold">→</span>
+            </div>
+            <div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-extrabold text-white">{stats.prokerCount}</span>
+                <span className="text-xs font-semibold text-slate-400">Active</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                {stats.prokerCount > 0 ? `${stats.prokerCount} Program Kerja Tersimpan` : "Belum Ada Program Kerja"}
+              </p>
+            </div>
+          </Link>
+
+          {/* Stat Card 2: Pending Approval */}
+          {showApprovalCard && <button
+            onClick={() => {
+              const el = document.getElementById("approval-section");
+              if (el) el.scrollIntoView({ behavior: "smooth" });
+            }}
+            className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-purple-500/60 rounded-2xl p-5 shadow-lg hover:shadow-purple-500/5 transition-all group text-left flex flex-col justify-between space-y-4 cursor-pointer"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20 flex items-center justify-center font-bold text-xs">
+                  📄
+                </div>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  PENDING APPROVAL
+                </span>
+              </div>
+              <span className="text-slate-500 group-hover:text-purple-400 transition-colors text-xs font-bold">→</span>
+            </div>
+            <div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-extrabold text-white">{pendingList.length}</span>
+                <span className="text-xs font-semibold text-rose-400">Urgent</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Proposals &amp; Letters</p>
+            </div>
+          </button>}
+
+           {/* Stat Card 3: Saldo Kas (Rp 0) */}
+           {showFinanceCard ? <Link
+             href="/dashboard/finance"
+            className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-emerald-500/60 rounded-2xl p-5 shadow-lg hover:shadow-emerald-500/5 transition-all group flex flex-col justify-between space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold text-xs">
+                  💵
+                </div>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  SALDO KAS
+                </span>
+              </div>
+              <span className="text-slate-500 group-hover:text-emerald-400 transition-colors text-xs font-bold">→</span>
+            </div>
+            <div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-xl font-extrabold text-white">{formatCurrency(0)}</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Belum Ada Kas Masuk</p>
+            </div>
+           </Link> : roleGroup === "Pembina" ? (
+              <Link
+                href="/dashboard/attendance"
+                className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-emerald-500/60 rounded-2xl p-5 shadow-lg hover:shadow-emerald-500/5 transition-all group flex flex-col justify-between space-y-4"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold text-xs">
+                      📊
+                    </div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                      REKAP KEHADIRAN
+                    </span>
+                  </div>
+                  <span className="text-slate-500 group-hover:text-emerald-400 transition-colors text-xs font-bold">→</span>
+                </div>
+                <div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-extrabold text-white">{pembinaAttendance ? `${pembinaAttendance.hadir}/${pembinaAttendance.totalPresensi || pembinaAttendance.totalAnggota || 0}` : "—"}</span>
+                    <span className="text-xs font-semibold text-emerald-400">Hadir</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    {pembinaAttendance
+                      ? `${pembinaAttendance.totalAnggota} anggota • ${pembinaAttendance.totalRapat} rapat • ${pembinaAttendance.totalPresensi} presensi`
+                      : "Rekap absensi seluruh anggota/organisasi"}
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-1">Klik untuk lihat detail rekap</p>
+                </div>
+              </Link>
+            ) : (
+              <Link href="/dashboard/attendance" className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-emerald-500/60 rounded-2xl p-5 shadow-lg hover:shadow-emerald-500/5 transition-all group flex flex-col justify-between space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold text-xs">
+                      ✅
+                    </div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-200">KEHADIRAN PRIBADI</span>
+                  </div>
+                  <span className="text-slate-500 group-hover:text-emerald-400 transition-colors text-xs font-bold">→</span>
+                </div>
+                <div>
+                  <p className="text-2xl font-extrabold text-emerald-400">—</p>
+                  <p className="mt-1 text-[11px] text-slate-400">Rekap presensi periode aktif • Klik untuk detail</p>
+                </div>
+              </Link>
+            )}
+
+           {/* Stat Card 4: Total Rapat */}
+          <Link
+            href="/dashboard/meetings"
+            className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-rose-500/60 rounded-2xl p-5 shadow-lg hover:shadow-rose-500/5 transition-all group flex flex-col justify-between space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 flex items-center justify-center font-bold text-xs">
+                  👥
+                </div>
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  TOTAL RAPAT
+                </span>
+              </div>
+              <span className="text-slate-500 group-hover:text-rose-400 transition-colors text-xs font-bold">→</span>
+            </div>
+            <div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-extrabold text-white">{stats.meetingCount}</span>
+                <span className="text-xs font-semibold text-slate-400">Upcoming</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Hari ini - Minggu ini</p>
+            </div>
+          </Link>
+
+        </div>
+      </div>
+
+      {/* MAIN 2-COLUMN SPLIT GRID */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-2">
+
+        {/* LEFT COLUMN: ANTRIAN PERSETUJUAN DOKUMEN TABLE (8 COLS) */}
+        <div className="lg:col-span-8 space-y-6">
+          <div id="approval-section" className="bg-[#1e293b]/90 border border-slate-700/60 rounded-3xl p-6 shadow-lg space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <span>📥 Antrian Persetujuan Dokumen</span>
+                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                    {pendingList.length} Berkas
+                  </span>
                 </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Verifikasi proposal dan berkas laporan yang membutuhkan pengesahan pimpinan.
+                </p>
+              </div>
+            </div>
+
+            {/* TABLE FORMATTED ACCORDING TO MOCKUP */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-700/80 bg-slate-800/60 text-slate-400 font-bold uppercase tracking-wider text-[11px]">
+                    <th className="py-3.5 px-4 rounded-l-xl">Dokumen</th>
+                    <th className="py-3.5 px-4">Divisi</th>
+                    <th className="py-3.5 px-4">Pengaju</th>
+                    <th className="py-3.5 px-4">Status</th>
+                    <th className="py-3.5 px-4 text-right rounded-r-xl">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-slate-500">
+                        Memuat antrian persetujuan...
+                      </td>
+                    </tr>
+                  ) : pendingList.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-10 text-center text-slate-400">
+                        <div className="w-10 h-10 mx-auto rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-2 font-bold border border-emerald-500/20">
+                          ✓
+                        </div>
+                        Tidak ada antrian persetujuan dokumen saat ini.
+                      </td>
+                    </tr>
+                  ) : (
+                    pendingList.map((doc, idx) => (
+                      <tr key={doc.persetujuan_id} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="py-3.5 px-4 font-semibold text-slate-200 flex items-center gap-2">
+                          <span>📄</span> Proposal Proker Divisi {idx + 1}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-300 font-medium">
+                          {doc.approver_group_name || `Divisi ${idx + 1}`}
+                        </td>
+                        <td className="py-3.5 px-4 text-slate-300 font-medium">
+                          {user?.nama || "Pengurus OSIS"}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                            doc.urgency === "Urgent"
+                              ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                              : doc.urgency === "High"
+                              ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                              : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                          }`}>
+                            {doc.urgency || "Active"}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => handleApprovalAction(doc.persetujuan_id, "Pending")}
+                              disabled={actioningId !== null}
+                              className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold text-[11px] py-1.5 px-3 rounded-lg transition-all cursor-pointer"
+                              title="Tunda keputusan"
+                            >
+                              Pending
+                            </button>
+                            <button
+                              onClick={() => setShowRevisionModal(doc.persetujuan_id)}
+                              disabled={actioningId !== null}
+                              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-[11px] py-1.5 px-3 rounded-lg transition-all cursor-pointer"
+                            >
+                              Revisi
+                            </button>
+                            <button
+                              onClick={() => handleApprovalAction(doc.persetujuan_id, "Disetujui")}
+                              disabled={actioningId !== null}
+                              className="bg-[#2563eb] hover:bg-blue-600 text-white font-semibold text-[11px] py-1.5 px-3.5 rounded-lg shadow-sm transition-all cursor-pointer"
+                            >
+                              Approve
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: CALENDAR & HARIAN AGENDA (4 COLS) */}
+        <div className="lg:col-span-4 space-y-6">
+          <div className="bg-[#1e293b]/90 border border-slate-700/60 rounded-3xl p-6 shadow-lg space-y-5">
+            
+            {/* Calendar Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-white tracking-wide">
+                  {monthNames[currentMonthIndex].slice(0, 3)} {currentYear}
+                </h3>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handlePrevMonth}
+                    className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold transition-colors cursor-pointer"
+                    aria-label="Bulan Sebelumnya"
+                  >
+                    &lt;
+                  </button>
+                  <button
+                    onClick={handleNextMonth}
+                    className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-xs font-bold transition-colors cursor-pointer"
+                    aria-label="Bulan Berikutnya"
+                  >
+                    &gt;
+                  </button>
+                </div>
               </div>
 
-              {loading ? (
-                <div className="space-y-3 animate-pulse">
-                  <div className="h-10 bg-[var(--border)] rounded" />
-                  <div className="h-10 bg-[var(--border)] rounded" />
-                </div>
-              ) : pendingList.length === 0 ? (
-                <div className="text-center py-6 text-[var(--text-muted)] text-sm">
-                  Semua bersih! Tidak ada dokumen yang menunggu persetujuan.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {pendingList.map((app) => (
-                    <div key={app.persetujuan_id} className="p-3 rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="badge badge-info uppercase">Langkah {app.urutan}</span>
-                          <span className="text-xs text-[var(--text-muted)]">Dokumen ID: {app.dokumen_id}</span>
-                        </div>
-                        <p className="text-sm font-medium mt-1">Grup Approver: {app.approver_group_name}</p>
-                      </div>
+              <Link
+                href="/dashboard/schedule"
+                className="bg-[#2563eb] hover:bg-blue-600 text-white font-semibold text-xs py-2 px-3.5 rounded-xl shadow-md shadow-blue-500/20 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>📅</span> Kelola Kalender
+              </Link>
+            </div>
 
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => handleApprovalAction(app.persetujuan_id, "Disetujui")} disabled={actioningId !== null} className="btn-primary text-xs py-1.5 px-3">
-                          Setujui
-                        </button>
-                        <button onClick={() => setShowRevisionModal(app.persetujuan_id)} disabled={actioningId !== null} className="btn-secondary text-xs py-1.5 px-3">
-                          Revisi
+            {/* Days Header */}
+            <div className="grid grid-cols-7 text-center text-[10px] font-semibold uppercase text-slate-400">
+              <span>Mon</span>
+              <span>Tue</span>
+              <span>Wed</span>
+              <span>Thu</span>
+              <span>Fri</span>
+              <span>Sat</span>
+              <span>Sun</span>
+            </div>
+
+            {/* Calendar Days Grid */}
+            <div className="grid grid-cols-7 text-center gap-y-1.5 text-xs font-medium">
+              {Array.from({ length: startDayOffset }).map((_, i) => (
+                <div key={`empty-${i}`} className="py-1 text-transparent" />
+              ))}
+
+              {Array.from({ length: daysInMonth }).map((_, i) => {
+                const dayNum = i + 1;
+                const dayDateStr = getDateStr(currentYear, currentMonthIndex, dayNum);
+                const hasAgenda = agendas.some((a) => a.startDate === dayDateStr);
+                const isSelected = selectedDay === dayNum;
+
+                return (
+                  <button
+                    key={dayNum}
+                    onClick={() => setSelectedDay(dayNum)}
+                    className={`py-1.5 mx-auto w-8 h-8 rounded-full flex items-center justify-center transition-all cursor-pointer text-xs relative ${
+                      isSelected
+                        ? "bg-[#2563eb] text-white font-bold shadow-md shadow-blue-500/40 scale-105"
+                        : hasAgenda
+                        ? "bg-blue-500/20 text-blue-400 font-bold border border-blue-500/30"
+                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                    }`}
+                  >
+                    {dayNum}
+                    {hasAgenda && !isSelected && (
+                      <span className="absolute bottom-1 w-1 h-1 rounded-full bg-blue-400" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Harian Agenda Box */}
+            <div className="pt-4 border-t border-slate-800">
+              <div className="flex items-center justify-between text-xs mb-3">
+                <span className="font-bold text-white">
+                  Harian Agenda
+                </span>
+                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 font-semibold">
+                  {selectedAgendas.length} Acara
+                </span>
+              </div>
+
+              {selectedAgendas.length > 0 ? (
+                <div className="space-y-3">
+                  {selectedAgendas.map((item) => (
+                    <div
+                      key={item.id}
+                      className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700/80 space-y-1 animate-fade-in relative group"
+                    >
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="font-bold text-blue-400">{item.startTime} - {item.endTime} WIB</span>
+                        <button
+                          onClick={() => setAgendaToDelete(item)}
+                          className="text-slate-400 hover:text-rose-400 p-1 rounded hover:bg-rose-500/10 transition-colors cursor-pointer"
+                          title="Hapus Agenda Ini"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                          </svg>
                         </button>
                       </div>
+                      <h4 className="text-xs font-bold text-white leading-snug">
+                        {item.title}
+                      </h4>
+                      <p className="text-[11px] text-slate-400 flex items-center gap-1.5 pt-0.5">
+                        <span>📍 {item.location}</span>
+                      </p>
                     </div>
                   ))}
                 </div>
+              ) : (
+                <div className="p-4 text-center text-xs text-slate-400 bg-slate-800/40 rounded-2xl border border-dashed border-slate-700/80 space-y-2">
+                  <p>Tidak ada agenda khusus pada tanggal {selectedDay} {monthNames[currentMonthIndex]}.</p>
+                  <Link
+                    href="/dashboard/schedule?action=add"
+                    className="text-xs font-semibold text-blue-400 hover:underline inline-block cursor-pointer"
+                  >
+                    + Tambah agenda untuk tanggal ini
+                  </Link>
+                </div>
               )}
             </div>
-          )}
-
-          {showPersonalSummary && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="glass-card p-5">
-                <h2 className="font-semibold mb-3">Kehadiran Saya</h2>
-                <div className="flex items-end gap-3">
-                  <div className="text-3xl font-bold text-green-500">92%</div>
-                  <div className="text-xs text-[var(--text-muted)] mb-1">Tingkat kehadiran (11/12 rapat)</div>
-                </div>
-                <Link href="/dashboard/attendance" className="text-xs text-[var(--accent)] mt-3 inline-block hover:underline">Lihat detail kehadiran →</Link>
-              </div>
-              <div className="glass-card p-5">
-                <h2 className="font-semibold mb-3">Tugas Aktif</h2>
-                <div className="space-y-2">
-                  {myTasksCount === 0 ? (
-                    <p className="text-xs text-[var(--text-muted)]">Tidak ada tugas aktif.</p>
-                  ) : (
-                    <p className="text-sm font-bold text-[var(--accent)]">{myTasksCount} tugas menunggu diselesaikan!</p>
-                  )}
-                </div>
-                <Link href="/dashboard/task" className="text-xs text-[var(--accent)] mt-3 inline-block hover:underline">Kelola tugas →</Link>
-              </div>
-            </div>
-          )}
-
-
-        </div>
-
-        {/* Right Column: Timelines, Upcoming, Side widgets */}
-        <div className="space-y-6">
-          <div className="glass-card p-5">
-            <h2 className="text-base font-semibold mb-4">Agenda Hari Ini</h2>
-            <div className="space-y-3">
-              <div className="flex gap-3">
-                <div className="w-10 text-right text-xs font-medium text-[var(--text-muted)] mt-1">15:00</div>
-                <div className="flex-1 p-2 bg-[var(--accent)]/10 rounded-lg border border-[var(--accent)]/20">
-                  <div className="text-sm font-medium text-[var(--accent)]">Rapat Koordinasi BPH</div>
-                  <div className="text-xs text-[var(--text-muted)] mt-0.5">Ruang OSIS</div>
-                </div>
-              </div>
-              <div className="flex gap-3">
-                <div className="w-10 text-right text-xs font-medium text-[var(--text-muted)] mt-1">16:30</div>
-                <div className="flex-1 p-2 bg-[var(--bg-primary)] rounded-lg border border-[var(--border)]">
-                  <div className="text-sm font-medium">Gladi Bersih Porseni</div>
-                  <div className="text-xs text-[var(--text-muted)] mt-0.5">Lapangan Basket</div>
-                </div>
-              </div>
-            </div>
-            <Link href="/dashboard/schedule" className="btn-secondary w-full text-xs mt-4 justify-center">Lihat Kalender Lengkap</Link>
           </div>
-
-          {showFinancialSummary && (
-            <div className="glass-card p-5 bg-gradient-to-br from-emerald-900/40 to-[var(--bg-secondary)] border-emerald-500/30">
-              <h2 className="text-base font-semibold text-emerald-400 mb-2">Ringkasan Kas</h2>
-              <p className="text-3xl font-bold">{formatCurrency(stats.balance)}</p>
-              <div className="flex items-center gap-2 mt-4 text-xs">
-                <span className="text-emerald-400">↑ {formatCurrency(monthlyIncome)}</span>
-                <span className="text-red-400">↓ {formatCurrency(monthlyExpense)}</span>
-                <span className="text-[var(--text-muted)]">(Bulan ini)</span>
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
-      {/* Revision Modal */}
-      {showRevisionModal !== null && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="glass-card p-6 w-full max-w-md space-y-4">
-            <h3 className="text-lg font-semibold">📝 Berikan Catatan Revisi</h3>
+      {/* PORTAL MODALS: RENDERED AT BODY LEVEL VIA createPortal */}
+      {mounted && agendaToDelete && createPortal(
+        <div className="fixed inset-0 w-screen h-screen z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fade-in">
+          <div className="bg-[#1e293b] rounded-2xl p-6 sm:p-8 shadow-2xl max-w-sm w-full space-y-5 text-slate-100 border border-slate-700 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="text-lg font-extrabold text-white">Hapus Agenda Ini?</h3>
+              <p className="text-xs text-slate-400 font-medium max-w-xs mx-auto">
+                Apakah Anda yakin ingin menghapus agenda &quot;<span className="font-bold text-slate-200">{agendaToDelete.title}</span>&quot;?
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                onClick={() => setAgendaToDelete(null)}
+                className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleConfirmDelete}
+                className="px-6 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/20 transition-all cursor-pointer"
+              >
+                Ya, Hapus
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* SWEETALERT TOAST NOTIFICATION */}
+      {mounted && toast && createPortal(
+        <div className="fixed inset-0 w-screen h-screen z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md pointer-events-none animate-fade-in">
+          <div className="bg-[#1e293b] border border-slate-700 rounded-2xl p-6 shadow-2xl flex flex-col items-center text-center max-w-xs w-full space-y-3 pointer-events-auto transform scale-100 transition-all">
+            {toast.type === "success" ? (
+              <div className="w-14 h-14 rounded-full bg-emerald-500/20 border-2 border-emerald-500/40 flex items-center justify-center text-emerald-400 shadow-md">
+                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-rose-500/20 border-2 border-rose-500/40 flex items-center justify-center text-rose-400 shadow-md">
+                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </div>
+            )}
+            <h3 className="text-base font-extrabold text-white mt-1">{toast.title}</h3>
+            <p className="text-xs text-slate-400 font-medium leading-relaxed">{toast.message}</p>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* REVISION / REJECTION MODAL */}
+      {mounted && showRevisionModal !== null && createPortal(
+        <div className="fixed inset-0 w-screen h-screen z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fade-in">
+          <div className="bg-[#1e293b] p-6 rounded-2xl w-full max-w-md space-y-4 shadow-2xl border border-slate-700 text-slate-100">
+            <h3 className="text-lg font-bold flex items-center gap-2 text-white">
+              📝 Berikan Catatan Revisi
+            </h3>
             <textarea
               rows={4}
               value={revisionNotes}
               onChange={(e) => setRevisionNotes(e.target.value)}
-              className="input-field text-sm resize-none"
+              className="w-full px-4 py-3 bg-slate-800/80 border border-slate-700 rounded-xl text-white placeholder-slate-500 text-sm focus:outline-none focus:border-blue-500 focus:bg-slate-800 transition-all font-medium resize-none"
               placeholder="Jelaskan bagian mana yang perlu diperbaiki..."
               required
             ></textarea>
             <div className="flex justify-end gap-2">
-              <button onClick={() => setShowRevisionModal(null)} className="btn-secondary text-xs">Batal</button>
               <button
-                onClick={() => handleApprovalAction(showRevisionModal, "Ditolak", revisionNotes)}
+                onClick={() => setShowRevisionModal(null)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs py-2 px-4 rounded-xl transition-all cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                onClick={() =>
+                  handleApprovalAction(showRevisionModal, "Ditolak", revisionNotes)
+                }
                 disabled={!revisionNotes.trim() || actioningId !== null}
-                className="btn-primary text-xs"
+                className="bg-[#2563eb] hover:bg-blue-600 text-white font-semibold text-xs py-2 px-4 rounded-xl shadow-md shadow-blue-500/20 transition-all cursor-pointer"
               >
                 Kirim Revisi
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

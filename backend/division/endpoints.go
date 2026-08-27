@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 
 	"encore.dev/beta/auth"
 	"encore.dev/beta/errs"
@@ -94,6 +95,7 @@ func GetNavModules(ctx context.Context) (*NavModulesResponse, error) {
 		SELECT module_id, module_name, is_core FROM modules WHERE is_core = TRUE ORDER BY module_id
 	`)
 	if err != nil {
+		if strings.Contains(err.Error(), `relation "modules" does not exist`) { return defaultNavigation(ud), nil }
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}
 	defer coreRows.Close()
