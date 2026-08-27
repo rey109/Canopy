@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import { api, type ProkerDetail, type TaskDetail, type TransaksiDetail, type DokumenDetail, type PresensiDetail, type UserDetail } from "@/lib/api";
+import { api, type ProkerDetail, type TaskDetail, type TaskTemplateDetail, type TransaksiDetail, type DokumenDetail, type PresensiDetail, type UserDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
 
@@ -38,6 +38,10 @@ export default function ProkerDetailPage({ params }: PageProps) {
   const [taskScope, setTaskScope] = useState("Individual");
   const [taskAssignedTo, setTaskAssignedTo] = useState("");
   const [creatingTask, setCreatingTask] = useState(false);
+  // Template support — skala luas: bisa pakai template atau bebas (tanpa template)
+  const [taskTemplates, setTaskTemplates] = useState<TaskTemplateDetail[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>(""); // "" = tanpa template
+  const [customData, setCustomData] = useState<Record<number, string>>({});
 
   const fetchDetailData = async () => {
     try {
@@ -82,6 +86,10 @@ export default function ProkerDetailPage({ params }: PageProps) {
     fetchDetailData();
   }, [prokerId, user]);
 
+  useEffect(() => {
+    api.listTaskTemplates().then(r => setTaskTemplates(r.templates || [])).catch(()=>{});
+  }, []);
+
   const handleAddCoachingNote = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!coachingNote.trim()) return;
@@ -102,21 +110,38 @@ export default function ProkerDetailPage({ params }: PageProps) {
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
+    // validasi field template wajib jika pakai template
+    const selectedTpl = taskTemplates.find(t => String(t.template_id) === selectedTemplateId);
+    if (selectedTpl) {
+      for (const f of selectedTpl.fields) {
+        if (f.wajib && !String(customData[f.field_id] || "").trim()) {
+          alert(`Field wajib "${f.label}" belum diisi`);
+          return;
+        }
+      }
+    }
     setCreatingTask(true);
     try {
-      await api.createTask({
+      const payload: any = {
         proker_id: prokerId,
         judul: taskTitle,
         deskripsi: taskDesc,
         deadline: new Date(taskDeadline).toISOString(),
         scope: taskScope,
         assigned_to: taskAssignedTo || undefined,
-      });
+      };
+      if (selectedTemplateId) {
+        payload.template_id = Number(selectedTemplateId);
+        payload.custom_data = JSON.stringify(customData);
+      }
+      await api.createTask(payload);
       setTaskTitle("");
       setTaskDesc("");
       setTaskDeadline("");
       setTaskScope("Individual");
       setTaskAssignedTo("");
+      setSelectedTemplateId("");
+      setCustomData({});
       // reload tasks
       const tRes = await api.listTasks();
       setTasks(tRes.tasks.filter((t: TaskDetail) => t.proker_id === prokerId) || []);
@@ -302,11 +327,22 @@ export default function ProkerDetailPage({ params }: PageProps) {
             )}
           </div>
 
-          {/* Form Task */}
+          {/* Form Task — mendukung Tanpa Template & Pakai Template (skala luas) */}
           {canManageTask && (
             <div className="glass-card p-6 h-fit space-y-4">
               <h2 className="text-base font-semibold">✨ Buat Tugas Baru</h2>
+              <p className="text-[11px] text-[var(--text-muted)] -mt-2">Pilih <b>Tanpa Template</b> untuk tugas bebas, atau <b>Pakai Template</b> untuk bidang yang butuh field khusus (RAB, desain, dll).</p>
               <form onSubmit={handleCreateTask} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Gunakan Template</label>
+                  <select value={selectedTemplateId} onChange={(e) => { setSelectedTemplateId(e.target.value); setCustomData({}); }} className="input-field text-xs bg-[var(--bg-primary)]">
+                    <option value="">○ Tanpa Template — Tugas bebas (judul & deskripsi saja)</option>
+                    {taskTemplates.map(t => (
+                      <option key={t.template_id} value={String(t.template_id)}>📋 {t.nama_template} — {t.fields.length} field</option>
+                    ))}
+                  </select>
+                  {taskTemplates.length===0 && <p className="text-[10px] text-[var(--text-muted)] mt-1">Belum ada template. Buat dulu via API /task-template (opsional).</p>}
+                </div>
                 <div>
                   <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Judul Tugas</label>
                   <input type="text" value={taskTitle} onChange={(e) => setTaskTitle(e.target.value)} placeholder="Contoh: Cetak baliho acara" className="input-field text-xs" required />
@@ -315,6 +351,36 @@ export default function ProkerDetailPage({ params }: PageProps) {
                   <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Deskripsi Tugas</label>
                   <textarea rows={3} value={taskDesc} onChange={(e) => setTaskDesc(e.target.value)} placeholder="Tulis instruksi lengkap..." className="input-field text-xs resize-none" required></textarea>
                 </div>
+                {selectedTemplateId && (() => {
+                  const tpl = taskTemplates.find(t => String(t.template_id)===selectedTemplateId);
+                  if (!tpl) return null;
+                  return (
+                    <div className="p-3 bg-[var(--bg-primary)] rounded-xl border border-[var(--border)] space-y-3">
+                      <p className="text-xs font-semibold text-[var(--accent)]">Field Template: {tpl.nama_template}</p>
+                      {tpl.fields.sort((a,b)=>a.urutan-b.urutan).map(f => (
+                        <div key={f.field_id}>
+                          <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">{f.label} {f.wajib && <span className="text-red-400">*</span>} <span className="text-[10px] text-[var(--text-muted)]">({f.tipe_input})</span></label>
+                          {f.tipe_input==="Dropdown" ? (
+                            <select value={customData[f.field_id]||""} onChange={e=>setCustomData(s=>({...s, [f.field_id]: e.target.value}))} className="input-field text-xs bg-[var(--bg-primary)]" required={f.wajib}>
+                              <option value="">Pilih...</option>
+                              {(f.opsi_dropdown||"").split(",").map((o:string)=> o.trim() && <option key={o.trim()} value={o.trim()}>{o.trim()}</option>)}
+                            </select>
+                          ) : f.tipe_input==="Tanggal" ? (
+                            <input type="date" value={customData[f.field_id]||""} onChange={e=>setCustomData(s=>({...s, [f.field_id]: e.target.value}))} className="input-field text-xs" required={f.wajib} />
+                          ) : f.tipe_input==="Angka" ? (
+                            <input type="number" value={customData[f.field_id]||""} onChange={e=>setCustomData(s=>({...s, [f.field_id]: e.target.value}))} className="input-field text-xs" required={f.wajib} />
+                          ) : f.tipe_input==="Checkbox" ? (
+                            <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={customData[f.field_id]==="true"} onChange={e=>setCustomData(s=>({...s, [f.field_id]: e.target.checked ? "true" : "false"}))} /> Ya</label>
+                          ) : f.tipe_input==="File" ? (
+                            <input type="text" value={customData[f.field_id]||""} onChange={e=>setCustomData(s=>({...s, [f.field_id]: e.target.value}))} placeholder="URL / nama file" className="input-field text-xs" required={f.wajib} />
+                          ) : (
+                            <input type="text" value={customData[f.field_id]||""} onChange={e=>setCustomData(s=>({...s, [f.field_id]: e.target.value}))} placeholder={f.label} className="input-field text-xs" required={f.wajib} />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">Scope</label>
