@@ -64,6 +64,9 @@ export default function MemberPage() {
 
   const canEditMembers = user?.group_name === "Trimitra";
   const visibleDivisionIds = DEFAULT_DIVISIONS.map((division) => division.division_id).filter((id) => canViewDivision(user, id));
+  const isSekbid = user?.group_name === "Staf" || user?.group_name === "Kepala Divisi";
+  const isPrivilegedFilter = ["Trimitra", "Pembina", "Sekretaris", "Bendahara"].includes(user?.group_name || "");
+  const userDivisionName = DEFAULT_DIVISIONS.find(d => d.division_id === user?.division_id)?.division_name || `Sekbid ${user?.division_id || "-"}`;
 
   const fetchData = async () => {
     let divs = DEFAULT_DIVISIONS;
@@ -192,10 +195,19 @@ export default function MemberPage() {
     return "bg-blue-500/15 text-blue-400 border border-blue-500/30";
   };
 
+  // Default untuk Sekbid: hanya divisiku biar tidak bingung lihat Semua Divisi
+  useEffect(() => {
+    if (isSekbid && selectedDivisi==="All" && user?.division_id) {
+      setSelectedDivisi("Divisiku");
+    }
+  }, [user, isSekbid]);
+
   // Filter & Sort Logic
   const filteredMembers = members
     .filter((m) => {
-      const matchScope = m.division_id == null || visibleDivisionIds.includes(m.division_id);
+      const matchScope = isSekbid
+        ? (selectedDivisi==="All" ? true : m.division_id === user?.division_id)
+        : (m.division_id == null || visibleDivisionIds.includes(m.division_id));
       const matchName =
         searchName === "" ||
         m.nama.toLowerCase().includes(searchName.toLowerCase()) ||
@@ -203,11 +215,12 @@ export default function MemberPage() {
 
       const divName = (m.division_name || "").toLowerCase().trim();
       const selDivNorm = selectedDivisi.toLowerCase().trim();
-      const matchDivisi =
-        selectedDivisi === "All" ||
-        divName === selDivNorm ||
-        divName.startsWith(selDivNorm + " ") ||
-        divName.startsWith(selDivNorm + " -");
+      const matchDivisi = isSekbid
+        ? true // Sekbid pakai toggle Divisiku/Semua, bukan filter per-Sekbid
+        : selectedDivisi === "All" ||
+          divName === selDivNorm ||
+          divName.startsWith(selDivNorm + " ") ||
+          divName.startsWith(selDivNorm + " -");
 
       const matchAngkatan =
         selectedAngkatan === "All" || m.tahun_masuk === parseInt(selectedAngkatan, 10);
@@ -264,29 +277,37 @@ export default function MemberPage() {
             </div>
           </div>
 
-          {/* FILTER 2: Divisi */}
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-300">
-              Divisi
-            </label>
-            <select
-              value={selectedDivisi}
-              onChange={(e) => setSelectedDivisi(e.target.value)}
-              className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
-            >
-              <option value="All">Semua Divisi</option>
-              <option value="Seksi Bidang 1">Seksi Bidang 1 - Keagamaan</option>
-              <option value="Seksi Bidang 2">Seksi Bidang 2 - Budi Pekerti</option>
-              <option value="Seksi Bidang 3">Seksi Bidang 3 - Bela Negara</option>
-              <option value="Seksi Bidang 4">Seksi Bidang 4 - Prestasi/Seni</option>
-              <option value="Seksi Bidang 5">Seksi Bidang 5 - Demokrasi</option>
-              <option value="Seksi Bidang 6">Seksi Bidang 6 - Kewirausahaan</option>
-              <option value="Seksi Bidang 7">Seksi Bidang 7 - Kesehatan/UKS</option>
-              <option value="Seksi Bidang 8">Seksi Bidang 8 - Sastra/Budaya</option>
-              <option value="Seksi Bidang 9">Seksi Bidang 9 - TIK</option>
-              <option value="Seksi Bidang 10">Seksi Bidang 10 - Bahasa Asing</option>
-            </select>
-          </div>
+          {/* FILTER 2: Divisi — Trimitra/BPH/Pembina = semua Sekbid, Sekbid = hanya divisiku / semua organisasi */}
+          {isSekbid ? (
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-300">Divisi</label>
+              <select
+                value={selectedDivisi}
+                onChange={(e) => setSelectedDivisi(e.target.value)}
+                className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
+              >
+                <option value="Divisiku">Hanya {userDivisionName}</option>
+                <option value="All">Semua Anggota Organisasi</option>
+              </select>
+              <p className="text-[10px] text-slate-500">{selectedDivisi==="All" ? "Menampilkan seluruh anggota organisasi" : "Hanya anggota divisimu"}</p>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-300">
+                Divisi
+              </label>
+              <select
+                value={selectedDivisi}
+                onChange={(e) => setSelectedDivisi(e.target.value)}
+                className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
+              >
+                <option value="All">Semua Divisi</option>
+                {DEFAULT_DIVISIONS.map(d => (
+                  <option key={d.division_id} value={d.division_name.split(" - ")[0]}>{d.division_name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* FILTER 3: Angkatan */}
           <div className="space-y-1">
