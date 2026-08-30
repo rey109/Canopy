@@ -73,8 +73,9 @@ type LoginParams struct {
 }
 
 type LoginResponse struct {
-	Token string     `json:"token"`
-	User  UserDetail `json:"user"`
+	Token               string     `json:"token"`
+	User                UserDetail `json:"user"`
+	WajibGantiPassword  bool       `json:"wajib_ganti_password"`
 }
 
 // UserDetail adalah profil lengkap yang dikirim ke frontend saat login/getProfile.
@@ -105,17 +106,63 @@ type UserDetail struct {
 
 //encore:api public path=/user/login method=POST
 func Login(ctx context.Context, params *LoginParams) (*LoginResponse, error) {
+	if params.NIS == "" || params.Password == "" {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "NIS dan password wajib diisi"}
+	}
+
 	var passHash string
-	err := db.QueryRow(ctx, "SELECT password_hash FROM users WHERE nis = $1", params.NIS).Scan(&passHash)
+	var failedAttempts int
+	var wajibGantiPassword bool
+	err := db.QueryRow(ctx, `
+		SELECT password_hash, failed_attempts, wajib_ganti_password
+		FROM users
+		WHERE nis = $1
+	`, params.NIS).Scan(&passHash, &failedAttempts, &wajibGantiPassword)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &errs.Error{Code: errs.Unauthenticated, Message: "NIS atau password salah"}
 		}
-		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		// Fallback if failed_attempts or wajib_ganti_password column is not present in database yet
+		if strings.Contains(err.Error(), "failed_attempts") || strings.Contains(err.Error(), "wajib_ganti_password") || strings.Contains(err.Error(), "42703") {
+			err2 := db.QueryRow(ctx, `
+				SELECT password_hash
+				FROM users
+				WHERE nis = $1
+			`, params.NIS).Scan(&passHash)
+			if err2 != nil {
+				if errors.Is(err2, sql.ErrNoRows) {
+					return nil, &errs.Error{Code: errs.Unauthenticated, Message: "NIS atau password salah"}
+				}
+				return nil, &errs.Error{Code: errs.Internal, Message: err2.Error()}
+			}
+			failedAttempts = 0
+			wajibGantiPassword = false
+		} else {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+	}
+
+	if failedAttempts >= 5 {
+		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "akun terkunci, hubungi Sekretaris Umum atau Ketua Trimitra"}
 	}
 
 	if err = bcrypt.CompareHashAndPassword([]byte(passHash), []byte(params.Password)); err != nil {
+		if _, updateErr := db.Exec(ctx, "UPDATE users SET failed_attempts = failed_attempts + 1 WHERE nis = $1", params.NIS); updateErr != nil {
+			// Ignore if column doesn't exist yet
+			if !strings.Contains(updateErr.Error(), "failed_attempts") && !strings.Contains(updateErr.Error(), "42703") {
+				return nil, &errs.Error{Code: errs.Internal, Message: updateErr.Error()}
+			}
+		}
 		return nil, &errs.Error{Code: errs.Unauthenticated, Message: "NIS atau password salah"}
+	}
+
+	if _, err = db.Exec(ctx, "UPDATE users SET failed_attempts = 0, last_login = CURRENT_TIMESTAMP WHERE nis = $1", params.NIS); err != nil {
+		// Fallback for missing last_login or failed_attempts column
+		if strings.Contains(err.Error(), "failed_attempts") || strings.Contains(err.Error(), "last_login") || strings.Contains(err.Error(), "42703") {
+			_, _ = db.Exec(ctx, "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE nis = $1", params.NIS)
+		} else {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
 	}
 
 	ud, err := loadUserData(ctx, params.NIS)
@@ -139,7 +186,50 @@ func Login(ctx context.Context, params *LoginParams) (*LoginResponse, error) {
 		return nil, &errs.Error{Code: errs.Internal, Message: "gagal membuat token"}
 	}
 
-	return &LoginResponse{Token: tokenString, User: *detail}, nil
+	return &LoginResponse{
+		Token:              tokenString,
+		User:               *detail,
+		WajibGantiPassword: wajibGantiPassword,
+	}, nil
+}
+
+// ============================================================
+// ChangePassword
+// ============================================================
+
+type ChangePasswordParams struct {
+	PasswordBaru string `json:"password_baru"`
+}
+
+type ChangePasswordResponse struct {
+	Message string `json:"message"`
+}
+
+//encore:api auth path=/user/password method=PUT
+func ChangePassword(ctx context.Context, params *ChangePasswordParams) (*ChangePasswordResponse, error) {
+	if len(params.PasswordBaru) < 8 {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "password baru minimal 8 karakter"}
+	}
+
+	nis, ok := auth.UserID()
+	if !ok {
+		return nil, &errs.Error{Code: errs.Unauthenticated, Message: "tidak terautentikasi"}
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(params.PasswordBaru), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: "gagal hash password"}
+	}
+
+	if _, err = db.Exec(ctx, `
+		UPDATE users
+		SET password_hash = $1, wajib_ganti_password = FALSE, failed_attempts = 0
+		WHERE nis = $2
+	`, string(hashed), string(nis)); err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+
+	return &ChangePasswordResponse{Message: "password berhasil diperbarui"}, nil
 }
 
 // ============================================================

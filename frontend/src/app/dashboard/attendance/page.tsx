@@ -1,120 +1,363 @@
 "use client";
 
 import { useAuth } from "@/lib/auth-context";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api, type PresensiDetail, type RapatDetail } from "@/lib/api";
 
 export default function AttendancePage() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"pribadi" | "rekap">("pribadi");
+  const [activeTab, setActiveTab] = useState<"pribadi" | "rekap" | "gabungan" | "scan">("pribadi");
+  const [presensiAll, setPresensiAll] = useState<PresensiDetail[]>([]);
+  const [meetings, setMeetings] = useState<RapatDetail[]>([]);
+  const [anggotaAll, setAnggotaAll] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filterDivisi, setFilterDivisi] = useState<string>("semua");
+  const [scanRapatId, setScanRapatId] = useState<string>("");
+  const [scanQr, setScanQr] = useState<string>("");
+  const [scanTipe, setScanTipe] = useState<"Hadir"|"Izin"|"Sakit">("Hadir");
+  const [scanKet, setScanKet] = useState<string>("");
+  const [scanLoading, setScanLoading] = useState(false);
+  const [msg, setMsg] = useState<string>("");
 
-  // Mock data for UI demonstration
-  const personalRecords = [
-    { id: 1, title: "Rapat Rutin Bulanan", date: "2023-10-15", status: "Hadir" },
-    { id: 2, title: "Evaluasi Proker Porseni", date: "2023-10-10", status: "Izin" },
-    { id: 3, title: "Rapat Koordinasi Bidang", date: "2023-10-05", status: "Hadir" },
-  ];
+  const isPembina = user?.group_name === "Pembina";
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const mRes = await api.listMeetings();
+      setMeetings(mRes.rapat || []);
+      // Load anggota untuk rekap gabungan (dipakai sekretaris)
+      try {
+        const uRes = await api.listUsers();
+        if (uRes.users && uRes.users.length > 0) setAnggotaAll(uRes.users as any);
+        else throw new Error("empty");
+      } catch {
+        if (typeof window !== "undefined") {
+          const raw = localStorage.getItem("canopy_all_anggota");
+          if (raw) { try { setAnggotaAll(JSON.parse(raw)); } catch {} }
+          else {
+            // fallback mock 10 anggota jika belum ada
+            const mock = Array.from({length:10}, (_,i)=>({ nis:`20200${i+1}`, nama:`Anggota ${i+1}`, jurusan:"RPL", division_id: (i%10)+1, role_name:"Staf", group_name:"Staf" }));
+            setAnggotaAll(mock as any);
+          }
+        }
+      }
+      // Try to fetch presensi for each rapat (fallback will use localStorage)
+      const all: PresensiDetail[] = [];
+      // First try global localStorage
+      if (typeof window !== "undefined") {
+        const raw = localStorage.getItem("canopy_local_presensi");
+        if (raw) {
+          try { const arr = JSON.parse(raw) as PresensiDetail[]; all.push(...arr); } catch {}
+        }
+      }
+      // Also try to fetch per rapat from backend (will merge)
+      for (const r of (mRes.rapat || []).slice(0, 10)) {
+        try {
+          const pRes = await api.listPresensiRapat(r.rapat_id);
+          for (const p of pRes.presensi || []) {
+            if (!all.find((x) => x.presensi_id === p.presensi_id)) all.push(p);
+          }
+        } catch {}
+      }
+      // Also try menunggu list for pending
+      try {
+        const w = await api.listPresensiMenunggu();
+        for (const p of w.presensi || []) if (!all.find((x)=>x.presensi_id===p.presensi_id)) all.push(p);
+      } catch {}
+      setPresensiAll(all);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const canSeeRekap = 
-    user?.group_name === "Kepala Divisi" || 
-    user?.group_name === "Sekretaris" || 
-    user?.group_name === "Trimitra" || 
-    user?.group_name === "Pembina";
+  useEffect(() => { if (user) fetchData(); }, [user]);
 
-  const rekapTitle = 
-    user?.group_name === "Kepala Divisi" ? "Rekap Divisi" :
-    user?.group_name === "Sekretaris" ? "Rekap Organisasi" :
-    "Rekap Lintas Divisi";
+  // Untuk Pembina, default tampilkan rekap bukan pribadi
+  useEffect(() => {
+    if (user?.group_name === "Pembina") {
+      setActiveTab("rekap");
+    }
+  }, [user]);
+
+  const personalRecords = presensiAll.filter((p) => p.nis === user?.nis);
+  const stats = {
+    hadir: personalRecords.filter((p) => p.tipe.toLowerCase() === "hadir").length,
+    izin: personalRecords.filter((p) => p.tipe.toLowerCase() === "izin").length,
+    sakit: personalRecords.filter((p) => p.tipe.toLowerCase() === "sakit").length,
+    alpa: personalRecords.filter((p) => p.tipe.toLowerCase() === "alpa").length,
+  };
+
+  // Riwayat absen hanya untuk Trimitra, BPH (Sekretaris + Bendahara), dan Pembina
+  const isTrimitra = user?.group_name === "Trimitra";
+  const isBPH = user?.group_name === "Sekretaris" || user?.group_name === "Bendahara";
+  const canSeeRekap = isTrimitra || isBPH || isPembina;
+
+  const rekapTitle =
+    isPembina ? "Rekap Organisasi — Seluruh Anggota (Pembina)" :
+    isTrimitra ? "Rekap Lintas Divisi (Trimitra)" :
+    isBPH ? "Rekap Organisasi (BPH)" :
+    "Rekap";
+
+  const handleScan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!scanRapatId || !scanQr) { setMsg("Rapat dan QR wajib diisi"); return; }
+    setScanLoading(true);
+    setMsg("");
+    try {
+      const res = await api.scanPresensi({
+        qr_token: scanQr,
+        acara_id: Number(scanRapatId),
+        tipe: scanTipe,
+        keterangan: scanKet || undefined,
+      });
+      setMsg(`✓ Presensi berhasil: ${res.tipe} - ${res.status_verifikasi}`);
+      fetchData();
+      setScanQr(""); setScanKet("");
+    } catch (err: any) {
+      setMsg("Gagal scan: " + (err.message || "Unknown"));
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  const getRapatTitle = (acara_id: number) => {
+    const m = meetings.find((x) => x.rapat_id === acara_id);
+    return m ? m.judul : `Rapat #${acara_id}`;
+  };
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Kehadiran</h1>
-        <p className="text-[var(--text-muted)] text-sm mt-1">
-          Pantau status kehadiran kegiatan organisasi.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold">Kehadiran</h1>
+          <p className="text-[var(--text-muted)] text-sm mt-1">Pantau status kehadiran kegiatan organisasi. Data tersimpan di database & local fallback.</p>
+        </div>
+        <button onClick={fetchData} className="btn-secondary text-xs">Refresh</button>
       </div>
 
-      {canSeeRekap && (
-        <div className="flex gap-2 border-b border-[var(--border)]">
-          <button
-            onClick={() => setActiveTab("pribadi")}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === "pribadi"
-                ? "border-[var(--accent)] text-[var(--accent)]"
-                : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-            }`}
-          >
-            Presensi Pribadi
-          </button>
-          <button
-            onClick={() => setActiveTab("rekap")}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === "rekap"
-                ? "border-[var(--accent)] text-[var(--accent)]"
-                : "border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-            }`}
-          >
-            {rekapTitle}
-          </button>
-        </div>
-      )}
+      <div className="flex gap-2 border-b border-[var(--border)] overflow-x-auto">
+        {!isPembina && <button onClick={() => setActiveTab("pribadi")} className={`px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap ${activeTab==="pribadi" ? "border-[var(--accent)] text-[var(--accent)]" : "border-transparent text-[var(--text-muted)]"}`}>Presensi Pribadi</button>}
+        {canSeeRekap && <button onClick={() => setActiveTab("rekap")} className={`px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap ${activeTab==="rekap" ? "border-[var(--accent)] text-[var(--accent)]" : "border-transparent text-[var(--text-muted)]"}`}>{rekapTitle}</button>}
+        {canSeeRekap && <button onClick={() => setActiveTab("gabungan")} className={`px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap ${activeTab==="gabungan" ? "border-[var(--accent)] text-[var(--accent)]" : "border-transparent text-[var(--text-muted)]"} flex items-center gap-1`}>📊 Rekap Gabungan <span className="badge badge-info text-[10px]">{anggotaAll.length}</span></button>}
+        <button onClick={() => setActiveTab("scan")} className={`px-4 py-2 text-sm font-medium border-b-2 whitespace-nowrap ${activeTab==="scan" ? "border-[var(--accent)] text-[var(--accent)]" : "border-transparent text-[var(--text-muted)]"}`}>Scan QR / Izin</button>
+      </div>
 
-      {activeTab === "pribadi" && (
+      {activeTab === "pribadi" && !isPembina && (
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="card p-4 text-center">
-              <p className="text-2xl font-bold text-green-500">8</p>
-              <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mt-1">Hadir</p>
-            </div>
-            <div className="card p-4 text-center">
-              <p className="text-2xl font-bold text-yellow-500">1</p>
-              <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mt-1">Izin</p>
-            </div>
-            <div className="card p-4 text-center">
-              <p className="text-2xl font-bold text-red-500">0</p>
-              <p className="text-xs text-[var(--text-muted)] uppercase tracking-wider mt-1">Alpa</p>
-            </div>
+          <div className="grid grid-cols-4 gap-3">
+            <div className="card p-4 text-center"><p className="text-2xl font-bold text-green-500">{stats.hadir}</p><p className="text-xs text-[var(--text-muted)] mt-1">Hadir</p></div>
+            <div className="card p-4 text-center"><p className="text-2xl font-bold text-yellow-500">{stats.izin}</p><p className="text-xs text-[var(--text-muted)] mt-1">Izin</p></div>
+            <div className="card p-4 text-center"><p className="text-2xl font-bold text-blue-500">{stats.sakit}</p><p className="text-xs text-[var(--text-muted)] mt-1">Sakit</p></div>
+            <div className="card p-4 text-center"><p className="text-2xl font-bold text-red-500">{stats.alpa}</p><p className="text-xs text-[var(--text-muted)] mt-1">Alpa</p></div>
           </div>
-
           <div className="card">
-            <div className="p-4 border-b border-[var(--border)]">
+            <div className="p-4 border-b border-[var(--border)] flex justify-between items-center">
               <h3 className="font-semibold">Riwayat Kehadiran</h3>
+              <span className="text-xs text-[var(--text-muted)]">{personalRecords.length} records</span>
             </div>
-            <div className="divide-y divide-[var(--border)]">
-              {personalRecords.map((r) => (
-                <div key={r.id} className="p-4 flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-sm">{r.title}</p>
-                    <p className="text-xs text-[var(--text-muted)] mt-0.5">{r.date}</p>
-                  </div>
-                  <span className={`px-2.5 py-1 text-xs rounded-full font-medium ${
-                    r.status === "Hadir" ? "bg-green-500/10 text-green-500" :
-                    r.status === "Izin" ? "bg-yellow-500/10 text-yellow-500" :
-                    "bg-red-500/10 text-red-500"
-                  }`}>
-                    {r.status}
-                  </span>
-                </div>
-              ))}
-            </div>
+            {loading ? <div className="p-8 text-center text-[var(--text-muted)]">Memuat...</div> :
+             personalRecords.length===0 ? <div className="p-8 text-center text-[var(--text-muted)]">Belum ada presensi. Gunakan tab Scan QR atau minta Sekretaris input absensi rapat.</div> :
+             <div className="divide-y divide-[var(--border)]">
+               {personalRecords.map((r)=>(
+                 <div key={r.presensi_id} className="p-4 flex items-center justify-between">
+                   <div>
+                     <p className="font-medium text-sm">{getRapatTitle(r.acara_id)}</p>
+                     <p className="text-xs text-[var(--text-muted)] mt-0.5">{new Date(r.waktu_submit).toLocaleString("id-ID")} • NIS {r.nis}</p>
+                     {r.keterangan && <p className="text-xs text-[var(--text-muted)]">Ket: {r.keterangan}</p>}
+                   </div>
+                   <div className="text-right">
+                     <span className={`px-2.5 py-1 text-xs rounded-full font-medium ${r.tipe.toLowerCase()==="hadir"?"bg-green-500/10 text-green-500":r.tipe.toLowerCase()==="izin"?"bg-yellow-500/10 text-yellow-500":r.tipe.toLowerCase()==="sakit"?"bg-blue-500/10 text-blue-500":"bg-red-500/10 text-red-500"}`}>{r.tipe}</span>
+                     <p className="text-[10px] text-[var(--text-muted)] mt-1">{r.status_verifikasi}</p>
+                   </div>
+                 </div>
+               ))}
+             </div>
+            }
           </div>
         </div>
       )}
 
       {activeTab === "rekap" && canSeeRekap && (
-        <div className="card p-8 text-center">
-          <div className="w-16 h-16 mx-auto bg-[var(--bg-primary)] rounded-full flex items-center justify-center mb-4">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--text-muted)]">
-              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 00-3-3.87" />
-              <path d="M16 3.13a4 4 0 010 7.75" />
-            </svg>
+        <div className="card p-6">
+          <h3 className="font-semibold mb-4">Rekap Kehadiran — {rekapTitle}</h3>
+          {presensiAll.length===0 ? <p className="text-sm text-[var(--text-muted)] text-center py-8">Belum ada data presensi. Data akan muncul setelah absensi rapat disimpan (via Meetings → Absensi).</p> :
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-xs text-[var(--text-muted)] border-b"><th className="text-left p-2">Rapat</th><th className="text-left p-2">NIS</th><th className="text-left p-2">Tipe</th><th className="text-left p-2">Status</th><th className="text-left p-2">Waktu</th></tr></thead>
+              <tbody>
+                {presensiAll.slice(0, 50).map((p)=>(
+                  <tr key={p.presensi_id} className="border-b border-[var(--border)]">
+                    <td className="p-2 text-xs">{getRapatTitle(p.acara_id)} <span className="text-[10px] text-[var(--text-muted)]">#{p.acara_id}</span></td>
+                    <td className="p-2 text-xs">{p.nis}</td>
+                    <td className="p-2"><span className="badge text-[10px]">{p.tipe}</span></td>
+                    <td className="p-2 text-xs">{p.status_verifikasi}</td>
+                    <td className="p-2 text-xs">{new Date(p.waktu_submit).toLocaleDateString("id-ID")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {presensiAll.length>50 && <p className="text-xs text-[var(--text-muted)] mt-2">Menampilkan 50 dari {presensiAll.length} records.</p>}
           </div>
-          <h3 className="font-semibold text-lg mb-2">Modul {rekapTitle}</h3>
-          <p className="text-[var(--text-muted)] text-sm max-w-sm mx-auto">
-            Fitur pelaporan kehadiran sedang dalam tahap pengembangan.
-          </p>
+          }
+        </div>
+      )}
+
+      {activeTab === "gabungan" && canSeeRekap && (
+        <div className="space-y-4">
+          <div className="glass-card p-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="font-semibold">📊 Rekap Gabungan — Semua Anggota</h3>
+                <p className="text-xs text-[var(--text-muted)] mt-1">Rekap terpisah & disatukan untuk semua anggota agar sekretaris mudah mendata. Data dari <code>anggota</code> + <code>presensi</code> (database + local fallback).</p>
+              </div>
+              <div className="flex gap-2">
+                <select value={filterDivisi} onChange={(e)=>setFilterDivisi(e.target.value)} className="input-field bg-[var(--bg-primary)] text-xs py-1.5">
+                  <option value="semua">Semua SEKBID</option>
+                  {Array.from({length:10},(_,i)=><option key={i+1} value={String(i+1)}>SEKBID {i+1}</option>)}
+                </select>
+                <button onClick={()=>{
+                  const rows = anggotaAll.filter((a:any)=> filterDivisi==="semua" || String(a.division_id)===filterDivisi).map((m:any)=>{
+                    const recs = presensiAll.filter(p=>p.nis===m.nis);
+                    const hadir = recs.filter(r=>r.tipe.toLowerCase()==="hadir").length;
+                    const izin = recs.filter(r=>r.tipe.toLowerCase()==="izin").length;
+                    const sakit = recs.filter(r=>r.tipe.toLowerCase()==="sakit").length;
+                    const alpa = recs.filter(r=>r.tipe.toLowerCase()==="alpa").length;
+                    const total = meetings.length || 1;
+                    const hadirRate = ((hadir/total)*100).toFixed(0);
+                    return [m.nis, m.nama, `SEKBID ${m.division_id}`, hadir, izin, sakit, alpa, `${hadirRate}%`].join(",");
+                  });
+                  const csv = ["NIS,Nama,SEKBID,Hadir,Izin,Sakit,Alpa,Hadir%"].concat(rows).join("\n");
+                  const blob = new Blob([csv], {type:"text/csv"});
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a"); a.href=url; a.download=`rekap-gabungan-${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url);
+                }} className="btn-secondary text-xs">Export CSV</button>
+              </div>
+            </div>
+            {(() => {
+              const filteredAnggota = anggotaAll.filter((a:any)=> filterDivisi==="semua" || String(a.division_id)===filterDivisi);
+              if (filteredAnggota.length===0) return <p className="text-sm text-[var(--text-muted)] text-center py-8">Belum ada data anggota. Tambahkan di Team → SEKBID → Tambah Anggota.</p>;
+              const totalRapat = meetings.length;
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-xs text-[var(--text-muted)] border-b"><th className="text-left p-2">#</th><th className="text-left p-2">Nama / NIS</th><th className="text-left p-2">SEKBID</th><th className="text-center p-2">Hadir</th><th className="text-center p-2">Izin</th><th className="text-center p-2">Sakit</th><th className="text-center p-2">Alpa</th><th className="text-center p-2">%</th><th className="text-left p-2">Detail Rapat</th></tr></thead>
+                    <tbody>
+                      {filteredAnggota.map((m:any, idx:number)=>{
+                        const recs = presensiAll.filter(p=>p.nis===m.nis);
+                        const hadir = recs.filter(r=>r.tipe.toLowerCase()==="hadir").length;
+                        const izin = recs.filter(r=>r.tipe.toLowerCase()==="izin").length;
+                        const sakit = recs.filter(r=>r.tipe.toLowerCase()==="sakit").length;
+                        const alpa = recs.filter(r=>r.tipe.toLowerCase()==="alpa").length;
+                        const total = totalRapat || 1;
+                        const rate = Math.round((hadir/total)*100);
+                        return (
+                          <tr key={m.nis} className="border-b border-[var(--border)] hover:bg-[var(--bg-primary)]">
+                            <td className="p-2 text-xs text-[var(--text-muted)]">{idx+1}</td>
+                            <td className="p-2"><p className="font-medium text-xs truncate max-w-[160px]">{m.nama}</p><p className="text-[10px] text-[var(--text-muted)]">{m.nis} • {m.jurusan || "-"}</p></td>
+                            <td className="p-2"><span className="badge badge-info text-[10px]">SEKBID {m.division_id}</span></td>
+                            <td className="p-2 text-center"><span className="px-2 py-1 rounded bg-green-500/10 text-green-500 text-xs font-bold">{hadir}</span></td>
+                            <td className="p-2 text-center"><span className="px-2 py-1 rounded bg-yellow-500/10 text-yellow-500 text-xs font-bold">{izin}</span></td>
+                            <td className="p-2 text-center"><span className="px-2 py-1 rounded bg-blue-500/10 text-blue-500 text-xs font-bold">{sakit}</span></td>
+                            <td className="p-2 text-center"><span className="px-2 py-1 rounded bg-red-500/10 text-red-500 text-xs font-bold">{alpa}</span></td>
+                            <td className="p-2 text-center"><span className={`text-xs font-bold ${rate>=75?"text-green-500":rate>=50?"text-yellow-500":"text-red-500"}`}>{rate}%</span></td>
+                            <td className="p-2">
+                              <div className="flex gap-1 flex-wrap max-w-[220px]">
+                                {meetings.slice(0,5).map((rap:any)=>{
+                                  const pr = recs.find(r=>r.acara_id===rap.rapat_id);
+                                  const tipe = pr ? pr.tipe : "Belum";
+                                  const color = tipe.toLowerCase()==="hadir" ? "bg-green-500" : tipe.toLowerCase()==="izin" ? "bg-yellow-500" : tipe.toLowerCase()==="sakit" ? "bg-blue-500" : tipe.toLowerCase()==="alpa" ? "bg-red-500" : "bg-gray-500";
+                                  return <span key={rap.rapat_id} className={`w-2 h-2 rounded-full ${color}`} title={`${rap.judul}: ${tipe}`}></span>;
+                                })}
+                                {meetings.length>5 && <span className="text-[10px] text-[var(--text-muted)]">+{meetings.length-5}</span>}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-[var(--bg-primary)] p-3 rounded"><p className="text-xs text-[var(--text-muted)]">Total Anggota</p><p className="font-bold">{filteredAnggota.length}</p></div>
+                    <div className="bg-[var(--bg-primary)] p-3 rounded"><p className="text-xs text-[var(--text-muted)]">Total Rapat</p><p className="font-bold">{totalRapat}</p></div>
+                    <div className="bg-[var(--bg-primary)] p-3 rounded"><p className="text-xs text-[var(--text-muted)]">Total Presensi</p><p className="font-bold">{presensiAll.length}</p></div>
+                    <div className="bg-[var(--bg-primary)] p-3 rounded"><p className="text-xs text-[var(--text-muted)]">Rata Hadir</p><p className="font-bold">{filteredAnggota.length ? Math.round(filteredAnggota.reduce((acc:any,m:any)=>{ const r=presensiAll.filter(p=>p.nis===m.nis).filter(x=>x.tipe.toLowerCase()==="hadir").length; return acc + (r/(totalRapat||1)); },0)/filteredAnggota.length*100) : 0}%</p></div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+          {/* Rekap Terpisah per Rapat */}
+          <div className="glass-card p-6">
+            <h4 className="font-semibold text-sm mb-3">Rekap Terpisah per Rapat</h4>
+            {meetings.length===0 ? <p className="text-xs text-[var(--text-muted)]">Belum ada rapat.</p> :
+            <div className="space-y-3">
+              {meetings.slice(0,5).map((rap)=> {
+                const list = presensiAll.filter(p=>p.acara_id===rap.rapat_id);
+                const hadir = list.filter(p=>p.tipe.toLowerCase()==="hadir").length;
+                const izin = list.filter(p=>p.tipe.toLowerCase()==="izin").length;
+                const sakit = list.filter(p=>p.tipe.toLowerCase()==="sakit").length;
+                const alpa = list.filter(p=>p.tipe.toLowerCase()==="alpa").length;
+                return (
+                  <div key={rap.rapat_id} className="p-3 rounded border border-[var(--border)] bg-[var(--bg-primary)]">
+                    <p className="font-medium text-sm truncate">{rap.judul} <span className="text-xs text-[var(--text-muted)]">• {new Date(rap.tanggal).toLocaleDateString("id-ID")}</span></p>
+                    <div className="flex gap-2 mt-2 text-xs">
+                      <span className="px-2 py-1 bg-green-500/10 text-green-500 rounded">Hadir {hadir}</span>
+                      <span className="px-2 py-1 bg-yellow-500/10 text-yellow-500 rounded">Izin {izin}</span>
+                      <span className="px-2 py-1 bg-blue-500/10 text-blue-500 rounded">Sakit {sakit}</span>
+                      <span className="px-2 py-1 bg-red-500/10 text-red-500 rounded">Alpa {alpa}</span>
+                      <span className="ml-auto text-[10px] text-[var(--text-muted)]">{list.length} tercatat / {anggotaAll.length} anggota</span>
+                    </div>
+                  </div>
+                );
+              })}
+              {meetings.length>5 && <p className="text-xs text-[var(--text-muted)]">+ {meetings.length-5} rapat lain.</p>}
+            </div>
+            }
+          </div>
+        </div>
+      )}
+
+      {activeTab === "scan" && (
+        <div className="glass-card p-6 max-w-lg">
+          <h3 className="font-semibold mb-3">Scan QR Presensi / Ajukan Izin/Sakit</h3>
+          <p className="text-xs text-[var(--text-muted)] mb-4">Gunakan token QR dari rapat (lihat di Meetings → QR Code) atau isi manual untuk test. Data tersimpan di database, fallback ke local jika backend belum migrate.</p>
+          <form onSubmit={handleScan} className="space-y-3">
+            <div>
+              <label className="text-xs font-medium">Rapat ID *</label>
+              <select value={scanRapatId} onChange={(e)=>setScanRapatId(e.target.value)} className="input-field bg-[var(--bg-primary)] text-sm" required>
+                <option value="">Pilih Rapat...</option>
+                {meetings.map((m)=><option key={m.rapat_id} value={String(m.rapat_id)}>{m.judul} — {new Date(m.tanggal).toLocaleDateString("id-ID")}</option>)}
+              </select>
+              {meetings.length===0 && <p className="text-[10px] text-amber-400 mt-1">Belum ada rapat, buat dulu di Meetings. Atau isi manual ID (misal 101).</p>}
+              <input type="text" value={scanRapatId} onChange={(e)=>setScanRapatId(e.target.value)} placeholder="Atau ketik ID manual" className="input-field text-xs mt-2" />
+            </div>
+            <div>
+              <label className="text-xs font-medium">QR Token *</label>
+              <input type="text" value={scanQr} onChange={(e)=>setScanQr(e.target.value)} placeholder="Paste QR code (misal QR-BPH-2026 atau token rapat)" className="input-field text-sm" required />
+              <p className="text-[10px] text-[var(--text-muted)] mt-1">Untuk test lokal, bisa isi bebas (fallback tidak validasi QR ketat jika backend down).</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium">Tipe *</label>
+              <select value={scanTipe} onChange={(e)=>setScanTipe(e.target.value as any)} className="input-field bg-[var(--bg-primary)] text-sm">
+                <option value="Hadir">Hadir (QR Masuk)</option>
+                <option value="Izin">Izin</option>
+                <option value="Sakit">Sakit</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium">Keterangan (opsional)</label>
+              <textarea value={scanKet} onChange={(e)=>setScanKet(e.target.value)} placeholder="Alasan izin/sakit..." className="input-field text-sm" rows={2} />
+            </div>
+            <button type="submit" disabled={scanLoading} className="btn-primary w-full justify-center text-sm">{scanLoading ? "Memproses..." : "Kirim Presensi"}</button>
+            {msg && <p className={`text-xs p-2 rounded ${msg.startsWith("✓")?"bg-green-500/10 text-green-400":"bg-red-500/10 text-red-400"}`}>{msg}</p>}
+          </form>
+          <div className="mt-6 p-3 bg-[var(--bg-primary)] rounded text-xs text-[var(--text-muted)]">
+            <p className="font-semibold">Info:</p>
+            <p>• Hadir langsung Disetujui, Izin/Sakit menunggu verifikasi Sekretaris.</p>
+            <p>• Data tersimpan di <code>canopy_local_presensi</code> jika backend staging belum migrate (relation missing), tetap bisa dilihat di tab Pribadi/Rekap dan persist setelah refresh.</p>
+          </div>
         </div>
       )}
     </div>

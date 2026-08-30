@@ -3,20 +3,21 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { api, UserDetail, DivisionDetail } from "@/lib/api";
+import { canManageDivision, canViewDivision } from "@/lib/division-access";
 
 export type UIUserDetail = UserDetail & { division_name?: string };
 
 const DEFAULT_DIVISIONS: DivisionDetail[] = [
-  { division_id: 3, division_name: "Seksi Bidang 1 - Keagamaan", deskripsi: "" },
-  { division_id: 4, division_name: "Seksi Bidang 2 - Budi Pekerti", deskripsi: "" },
-  { division_id: 5, division_name: "Seksi Bidang 3 - Bela Negara", deskripsi: "" },
-  { division_id: 6, division_name: "Seksi Bidang 4 - Prestasi/Seni", deskripsi: "" },
-  { division_id: 7, division_name: "Seksi Bidang 5 - Demokrasi", deskripsi: "" },
-  { division_id: 8, division_name: "Seksi Bidang 6 - Kewirausahaan", deskripsi: "" },
-  { division_id: 9, division_name: "Seksi Bidang 7 - Kesehatan/UKS", deskripsi: "" },
-  { division_id: 10, division_name: "Seksi Bidang 8 - Sastra/Budaya", deskripsi: "" },
-  { division_id: 11, division_name: "Seksi Bidang 9 - TIK", deskripsi: "" },
-  { division_id: 12, division_name: "Seksi Bidang 10 - Bahasa Asing", deskripsi: "" },
+  { division_id: 1, division_name: "Seksi Bidang 1 - Keagamaan", deskripsi: "" },
+  { division_id: 2, division_name: "Seksi Bidang 2 - Budi Pekerti", deskripsi: "" },
+  { division_id: 3, division_name: "Seksi Bidang 3 - Bela Negara", deskripsi: "" },
+  { division_id: 4, division_name: "Seksi Bidang 4 - Prestasi/Seni", deskripsi: "" },
+  { division_id: 5, division_name: "Seksi Bidang 5 - Demokrasi", deskripsi: "" },
+  { division_id: 6, division_name: "Seksi Bidang 6 - Kewirausahaan", deskripsi: "" },
+  { division_id: 7, division_name: "Seksi Bidang 7 - Kesehatan/UKS", deskripsi: "" },
+  { division_id: 8, division_name: "Seksi Bidang 8 - Sastra/Budaya", deskripsi: "" },
+  { division_id: 9, division_name: "Seksi Bidang 9 - TIK", deskripsi: "" },
+  { division_id: 10, division_name: "Seksi Bidang 10 - Bahasa Asing", deskripsi: "" },
 ];
 
 const DEFAULT_ROLES = [
@@ -31,18 +32,7 @@ const DEFAULT_ROLES = [
 
 export default function MemberPage() {
   const { user } = useAuth();
-  const [members, setMembers] = useState<UIUserDetail[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("canopy_members_data");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-      } catch (e) {}
-    }
-    return [];
-  });
+  const [members, setMembers] = useState<UIUserDetail[]>([]);
   const [divisionsList, setDivisionsList] = useState<DivisionDetail[]>(DEFAULT_DIVISIONS);
   const [rolesList, setRolesList] = useState<any[]>(DEFAULT_ROLES);
   const [activePeriodeId, setActivePeriodeId] = useState<number | null>(1);
@@ -72,9 +62,11 @@ export default function MemberPage() {
   const gName = (user?.group_name || "").toLowerCase();
   const rName = (user?.role_name || "").toLowerCase();
 
-  const canEditMembers =
-    gName.includes("sekretar") ||
-    rName.includes("sekretar");
+  const canEditMembers = user?.group_name === "Trimitra";
+  const visibleDivisionIds = DEFAULT_DIVISIONS.map((division) => division.division_id).filter((id) => canViewDivision(user, id));
+  const isSekbid = user?.group_name === "Staf" || user?.group_name === "Kepala Divisi";
+  const isPrivilegedFilter = ["Trimitra", "Pembina", "Sekretaris", "Bendahara"].includes(user?.group_name || "");
+  const userDivisionName = DEFAULT_DIVISIONS.find(d => d.division_id === user?.division_id)?.division_name || `Sekbid ${user?.division_id || "-"}`;
 
   const fetchData = async () => {
     let divs = DEFAULT_DIVISIONS;
@@ -109,7 +101,7 @@ export default function MemberPage() {
     try {
       const usersRes = await api.listUsers().catch(() => null);
       if (usersRes?.users && usersRes.users.length > 0) {
-        loadedMembers = usersRes.users.map((u) => {
+        loadedMembers = usersRes.users.map((u: UIUserDetail) => {
           const matchedDiv = divs.find((d) => d.division_id === u.division_id);
           return {
             ...u,
@@ -119,25 +111,7 @@ export default function MemberPage() {
       }
     } catch (e) {}
 
-    if (loadedMembers.length === 0) {
-      if (typeof window !== "undefined") {
-        try {
-          const saved = localStorage.getItem("canopy_members_data");
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              setMembers(parsed);
-              return;
-            }
-          }
-        } catch (e) {}
-      }
-    } else {
-      setMembers(loadedMembers);
-      try {
-        localStorage.setItem("canopy_members_data", JSON.stringify(loadedMembers));
-      } catch (e) {}
-    }
+    setMembers(loadedMembers);
   };
 
   useEffect(() => {
@@ -186,13 +160,7 @@ export default function MemberPage() {
       division_name: selDiv ? selDiv.division_name : "Seksi Bidang 1 - Keagamaan"
     };
 
-    setMembers((prev) => {
-      const updated = [createdMember, ...prev.filter((m) => m.nis !== nisToUse)];
-      try {
-        localStorage.setItem("canopy_members_data", JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
+    void api.register({ nis: nisToUse, nama: createdMember.nama, jurusan: createdMember.jurusan, tahun_masuk: createdMember.tahun_masuk, password: nisToUse }).then(() => api.assignMembership({ nis: nisToUse, role_id: selRole.role_id, division_id: createdMember.division_id || undefined, periode_id: activePeriodeId || 1 })).then(() => fetchData()).catch((error: unknown) => alert(error instanceof Error ? error.message : "Gagal menyimpan anggota."));
 
     setIsAddModalOpen(false);
     setNewNis("");
@@ -209,13 +177,7 @@ export default function MemberPage() {
       alert("Hanya Sekretariat yang memiliki akses untuk menghapus anggota.");
       return;
     }
-    setMembers((prev) => {
-      const updated = prev.filter((m) => m.nis !== nis);
-      try {
-        localStorage.setItem("canopy_members_data", JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
+    alert("Penghapusan anggota harus dilakukan melalui endpoint administrasi backend.");
     setMemberToDelete(null);
     showSwalAlert("Berhasil Dihapus!", "Data anggota telah dihapus.", "delete");
   };
@@ -233,9 +195,14 @@ export default function MemberPage() {
     return "bg-blue-500/15 text-blue-400 border border-blue-500/30";
   };
 
-  // Filter & Sort Logic
+  // Sekbid tidak pakai filter Divisi — selalu divisinya sendiri
+
+  // Filter & Sort Logic — Sekbid hanya divisinya, privileged bisa semua
   const filteredMembers = members
     .filter((m) => {
+      const matchScope = isSekbid
+        ? m.division_id === user?.division_id
+        : (m.division_id == null || visibleDivisionIds.includes(m.division_id));
       const matchName =
         searchName === "" ||
         m.nama.toLowerCase().includes(searchName.toLowerCase()) ||
@@ -243,11 +210,12 @@ export default function MemberPage() {
 
       const divName = (m.division_name || "").toLowerCase().trim();
       const selDivNorm = selectedDivisi.toLowerCase().trim();
-      const matchDivisi =
-        selectedDivisi === "All" ||
-        divName === selDivNorm ||
-        divName.startsWith(selDivNorm + " ") ||
-        divName.startsWith(selDivNorm + " -");
+      const matchDivisi = isSekbid
+        ? true // Sekbid pakai toggle Divisiku/Semua, bukan filter per-Sekbid
+        : selectedDivisi === "All" ||
+          divName === selDivNorm ||
+          divName.startsWith(selDivNorm + " ") ||
+          divName.startsWith(selDivNorm + " -");
 
       const matchAngkatan =
         selectedAngkatan === "All" || m.tahun_masuk === parseInt(selectedAngkatan, 10);
@@ -257,17 +225,39 @@ export default function MemberPage() {
       const matchRole =
         selectedRole === "All" || roleName === selRoleNorm;
 
-      return matchName && matchDivisi && matchAngkatan && matchRole;
+      return matchScope && matchName && matchDivisi && matchAngkatan && matchRole;
     })
     .sort((a, b) => a.nama.localeCompare(b.nama, "id", { sensitivity: "base" }));
+
+  // Role-specific display
+  const isPembinaRole = user?.group_name === "Pembina";
+  const isTrimitraRole = user?.group_name === "Trimitra";
+  const isBphRole = ["Sekretaris","Bendahara"].includes(user?.group_name || "");
+  const displayTitle = isSekbid
+    ? `Tim ${userDivisionName}`
+    : isBphRole
+      ? "Anggota BPH & Organisasi"
+      : isTrimitraRole
+        ? "Anggota Organisasi — Trimitra"
+        : isPembinaRole
+          ? "Anggota Organisasi — Pembina (Read-only)"
+          : "Anggota Organisasi";
+  const displaySubtitle = isSekbid
+    ? `Menampilkan anggota ${userDivisionName} — tim inti divisimu. ${filteredMembers.length} anggota.`
+    : isPembinaRole
+      ? "Pemantauan seluruh anggota organisasi — mode baca."
+      : undefined;
 
   return (
     <div className="space-y-6 animate-fade-in text-slate-100 font-sans pb-12">
       {/* 1. TOP HEADER BAR: TITLE & CREATE NEW BUTTON (ONLY VISIBLE TO SEKRETARIAT) */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-slate-50 tracking-tight">
-          Anggota
-        </h1>
+        <div>
+          <h1 className="text-2xl font-bold text-slate-50 tracking-tight">
+            {displayTitle}
+          </h1>
+          {displaySubtitle && <p className="text-xs text-slate-400 mt-1">{displaySubtitle}</p>}
+        </div>
 
         {canEditMembers && (
           <button
@@ -286,9 +276,9 @@ export default function MemberPage() {
           Filter Anggota
         </h2>
 
-        {/* 4 FILTERS HORIZONTAL GRID */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* FILTER 1: Anggota (Search Box) */}
+        {/* FILTERS — tampil beda per role */}
+        <div className={`grid grid-cols-1 sm:grid-cols-2 ${isSekbid ? "lg:grid-cols-3" : "lg:grid-cols-4"} gap-4`}>
+          {/* FILTER 1: Anggota (Search Box) — selalu ada */}
           <div className="space-y-1">
             <label className="text-xs font-semibold text-slate-300">
               Anggota
@@ -304,29 +294,36 @@ export default function MemberPage() {
             </div>
           </div>
 
-          {/* FILTER 2: Divisi */}
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-300">
-              Divisi
-            </label>
-            <select
-              value={selectedDivisi}
-              onChange={(e) => setSelectedDivisi(e.target.value)}
-              className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
-            >
-              <option value="All">Semua Divisi</option>
-              <option value="Seksi Bidang 1">Seksi Bidang 1 - Keagamaan</option>
-              <option value="Seksi Bidang 2">Seksi Bidang 2 - Budi Pekerti</option>
-              <option value="Seksi Bidang 3">Seksi Bidang 3 - Bela Negara</option>
-              <option value="Seksi Bidang 4">Seksi Bidang 4 - Prestasi/Seni</option>
-              <option value="Seksi Bidang 5">Seksi Bidang 5 - Demokrasi</option>
-              <option value="Seksi Bidang 6">Seksi Bidang 6 - Kewirausahaan</option>
-              <option value="Seksi Bidang 7">Seksi Bidang 7 - Kesehatan/UKS</option>
-              <option value="Seksi Bidang 8">Seksi Bidang 8 - Sastra/Budaya</option>
-              <option value="Seksi Bidang 9">Seksi Bidang 9 - TIK</option>
-              <option value="Seksi Bidang 10">Seksi Bidang 10 - Bahasa Asing</option>
-            </select>
-          </div>
+          {/* FILTER 2: Divisi — hanya Trimitra/BPH/Pembina */}
+          {!isSekbid && (
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-300">
+                Divisi
+              </label>
+              <select
+                value={selectedDivisi}
+                onChange={(e) => setSelectedDivisi(e.target.value)}
+                className="w-full bg-slate-950/80 border border-slate-700 focus:border-blue-500 rounded-xl p-2 text-xs text-slate-200 focus:outline-none"
+              >
+                <option value="All">Semua Divisi</option>
+                {DEFAULT_DIVISIONS.map(d => (
+                  <option key={d.division_id} value={d.division_name.split(" - ")[0]}>{d.division_name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Info card untuk Sekbid sebagai pengganti filter Divisi */}
+          {isSekbid && (
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-300">Divisiku</label>
+              <div className="w-full bg-slate-800/50 border border-blue-500/20 rounded-xl px-3 py-2.5 flex items-center justify-between">
+                <span className="text-xs font-bold text-blue-300">{userDivisionName}</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">Aktif</span>
+              </div>
+              <p className="text-[10px] text-slate-500">Fokus tim divisimu • {filteredMembers.length} anggota</p>
+            </div>
+          )}
 
           {/* FILTER 3: Angkatan */}
           <div className="space-y-1">
@@ -368,7 +365,7 @@ export default function MemberPage() {
         </div>
 
         <p className="text-[11px] text-slate-500 italic pt-1">
-          *Data telah ditampilkan sesuai dengan filter yang Anda pilih
+           *Data telah ditampilkan sesuai dengan filter, scope, dan jabatan aktif Anda
         </p>
       </div>
 
@@ -379,7 +376,7 @@ export default function MemberPage() {
             <thead>
               <tr className="bg-slate-950/80 border-b border-slate-800/80 text-[11px] font-semibold text-slate-400">
                 <th className="p-4 pl-6">Nama Anggota</th>
-                <th className="p-4">Divisi</th>
+                {!isSekbid && <th className="p-4">Divisi</th>}
                 <th className="p-4">Angkatan</th>
                 <th className="p-4 text-center pr-6">Role</th>
               </tr>
@@ -387,8 +384,8 @@ export default function MemberPage() {
             <tbody className="divide-y divide-slate-800/60 text-slate-200">
               {filteredMembers.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="p-12 text-center text-slate-500 text-xs italic">
-                    Tidak ada data anggota ditemukan.
+                  <td colSpan={isSekbid ? 3 : 4} className="p-12 text-center text-slate-500 text-xs italic">
+                    {isSekbid ? `Belum ada anggota di ${userDivisionName}.` : "Tidak ada data anggota ditemukan."}
                   </td>
                 </tr>
               ) : (
@@ -411,10 +408,10 @@ export default function MemberPage() {
                       </div>
                     </td>
 
-                    {/* Column 2: Divisi */}
-                    <td className="p-4 text-slate-300 font-medium">
+                    {/* Column 2: Divisi — hanya untuk Trimitra/BPH/Pembina */}
+                    {!isSekbid && <td className="p-4 text-slate-300 font-medium">
                       {m.division_name || m.group_name || "-"}
-                    </td>
+                    </td>}
 
                     {/* Column 3: Angkatan */}
                     <td className="p-4 font-mono text-slate-400">

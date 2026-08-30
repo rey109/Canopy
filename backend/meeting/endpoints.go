@@ -4,10 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"encore.dev/beta/auth"
@@ -264,9 +268,9 @@ func UpdateRapat(ctx context.Context, id int, params *UpdateRapatParams) (*Rapat
 	}
 
 	canEdit := false
-	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" || ud.GroupName == "Pembina" {
+	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" {
 		canEdit = true
-	} else if string(nisStr) == dibuatOleh {
+	} else if string(nisStr) == dibuatOleh && ud.GroupName != "Pembina" && ud.GroupName != "Staf" {
 		canEdit = true
 	} else if ud.GroupName == "Kepala Divisi" && divID.Valid && ud.DivisionID != nil && int(divID.Int32) == *ud.DivisionID {
 		canEdit = true
@@ -360,9 +364,9 @@ func HapusRapat(ctx context.Context, id int) (*MessageResponse, error) {
 	}
 
 	canDelete := false
-	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" || ud.GroupName == "Pembina" {
+	if ud.GroupName == "Sekretaris" || ud.GroupName == "Trimitra" {
 		canDelete = true
-	} else if string(nisStr) == dibuatOleh {
+	} else if string(nisStr) == dibuatOleh && ud.GroupName != "Pembina" && ud.GroupName != "Staf" {
 		canDelete = true
 	} else if ud.GroupName == "Kepala Divisi" && divID.Valid && ud.DivisionID != nil && int(divID.Int32) == *ud.DivisionID {
 		canDelete = true
@@ -488,14 +492,6 @@ func UpsertNotulensi(ctx context.Context, id int, params *UpsertNotulensiParams)
 //encore:api auth path=/rapat/:id/notulensi/finalisasi method=POST
 func FinalisasiNotulensi(ctx context.Context, id int) (*NotulensiDetail, error) {
 	nis, _ := auth.UserID()
-	ud := auth.Data().(*user.UserData)
-
-	if ud.GroupName != "Sekretaris" || ud.Level != 1 {
-		return nil, &errs.Error{
-			Code:    errs.PermissionDenied,
-			Message: "hanya Sekretaris Umum (level 1) yang dapat memfinalisasi notulensi",
-		}
-	}
 
 	var n NotulensiDetail
 	var retFinalisasi sql.NullString
@@ -557,6 +553,12 @@ type UploadNotulensiFileResponse struct {
 	FileType string `json:"file_type"`
 }
 
+// maxNotulensiFileBytes — batas ukuran file lampiran (10 MB)
+const maxNotulensiFileBytes = 10 << 20
+
+// UploadNotulensiFile — simpan file/foto lampiran notulensi secara permanen.
+// Mengembalikan URL relatif /notulensi-files/<token> yang dapat dipakai untuk
+// preview maupun download tanpa header Authorization.
 //encore:api auth path=/rapat/:id/notulensi/upload method=POST
 func UploadNotulensiFile(ctx context.Context, id int, params *UploadNotulensiFileParams) (*UploadNotulensiFileResponse, error) {
 	ud := auth.Data().(*user.UserData)
@@ -569,14 +571,188 @@ func UploadNotulensiFile(ctx context.Context, id int, params *UploadNotulensiFil
 	if params.FileName == "" || params.FileDataB64 == "" {
 		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "file_name dan file_data_b64 wajib diisi"}
 	}
+	if len(params.FileDataB64) > base64.StdEncoding.EncodedLen(maxNotulensiFileBytes) {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "ukuran file terlalu besar (maksimal 10 MB)"}
+	}
 
-	dataURL := fmt.Sprintf("data:%s;base64,%s", params.FileType, params.FileDataB64)
+	// Buang prefix data URL jika ada (data:<type>;base64,)
+	b64 := params.FileDataB64
+	if idx := strings.Index(b64, ","); idx >= 0 && strings.HasPrefix(b64, "data:") {
+		b64 = b64[idx+1:]
+	}
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		if data2, err2 := base64.RawStdEncoding.DecodeString(strings.TrimRight(b64, "=")); err2 == nil {
+			data = data2
+		} else {
+			return nil, &errs.Error{Code: errs.InvalidArgument, Message: "file_data_b64 bukan base64 yang valid"}
+		}
+	}
+	if len(data) == 0 {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "file kosong"}
+	}
+	if len(data) > maxNotulensiFileBytes {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "ukuran file terlalu besar (maksimal 10 MB)"}
+	}
+
+	// Pastikan rapat ada
+	var exists bool
+	if err := db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM rapat WHERE rapat_id = $1)`, id).Scan(&exists); err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	if !exists {
+		return nil, &errs.Error{Code: errs.NotFound, Message: "rapat tidak ditemukan"}
+	}
+
+	tokenBytes := make([]byte, 16)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: "gagal generate token file"}
+	}
+	token := hex.EncodeToString(tokenBytes)
+
+	fileType := params.FileType
+	if fileType == "" {
+		fileType = "application/octet-stream"
+	}
+
+	var fileID int64
+	err = db.QueryRow(ctx, `
+		INSERT INTO notulensi_files (rapat_id, token, file_name, file_type, file_size, content)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING file_id
+	`, id, token, params.FileName, fileType, len(data), data).Scan(&fileID)
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
 
 	return &UploadNotulensiFileResponse{
-		URL:      dataURL,
+		URL:      fmt.Sprintf("/notulensi-files/%s", token),
 		Name:     params.FileName,
-		FileType: params.FileType,
+		FileType: fileType,
 	}, nil
+}
+
+// ServeNotulensiFile — endpoint publik (tanpa auth header) untuk menampilkan /
+// mengunduh lampiran notulensi via token unik yang tidak dapat ditebak.
+//encore:api public raw method=GET path=/notulensi-files/*token
+func ServeNotulensiFile(w http.ResponseWriter, req *http.Request) {
+	token := strings.TrimPrefix(req.URL.Path, "/notulensi-files/")
+	token = strings.Trim(token, "/")
+	if token == "" {
+		http.Error(w, "token tidak valid", http.StatusBadRequest)
+		return
+	}
+
+	var fileName, fileType string
+	var content []byte
+	err := db.QueryRow(req.Context(), `
+		SELECT file_name, file_type, content FROM notulensi_files WHERE token = $1
+	`, token).Scan(&fileName, &fileType, &content)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "file tidak ditemukan", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "gagal mengambil file", http.StatusInternalServerError)
+		return
+	}
+
+	if fileType == "" {
+		fileType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", fileType)
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	disposition := "attachment"
+	if strings.HasPrefix(fileType, "image/") || fileType == "application/pdf" || fileType == "text/plain" {
+		disposition = "inline"
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename*=UTF-8''%s", disposition, urlPathEscape(fileName)))
+	_, _ = w.Write(content)
+}
+
+func urlPathEscape(s string) string {
+	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
+}
+
+// ============================================================
+// DAFTAR SEMUA NOTULENSI (modul manajemen)
+// ============================================================
+
+type NotulensiListItem struct {
+	NotulensiID      int                   `json:"notulensi_id"`
+	RapatID          int                   `json:"rapat_id"`
+	JudulRapat       string                `json:"judul_rapat"`
+	TanggalRapat     time.Time             `json:"tanggal_rapat"`
+	LokasiRapat      string                `json:"lokasi_rapat"`
+	StatusRapat      string                `json:"status_rapat"`
+	DivisionID       *int                  `json:"division_id"`
+	DibuatOleh       string                `json:"dibuat_oleh"`
+	Isi              string                `json:"isi"`
+	Attachments      []NotulensiAttachment `json:"attachments"`
+	Status           string                `json:"status"`
+	DifinalisasiOleh *string               `json:"difinalisasi_oleh"`
+	UpdatedAt        time.Time             `json:"updated_at"`
+}
+
+type ListNotulensiResponse struct {
+	Notulensi []NotulensiListItem `json:"notulensi"`
+}
+
+// ListNotulensi — arsip seluruh notulensi rapat yang dapat dilihat user.
+//encore:api auth path=/notulensi method=GET
+func ListNotulensi(ctx context.Context) (*ListNotulensiResponse, error) {
+	ud := auth.Data().(*user.UserData)
+
+	baseQuery := `
+		SELECT n.notulensi_id, n.rapat_id, r.judul, r.tanggal, r.lokasi, r.status,
+		       r.division_id, r.dibuat_oleh, n.isi, n.attachments, n.status,
+		       n.difinalisasi_oleh, n.updated_at
+		FROM notulensi n
+		JOIN rapat r ON r.rapat_id = n.rapat_id
+	`
+	var rows *sqldb.Rows
+	var err error
+	if ud.HasScopeAll() {
+		rows, err = db.Query(ctx, baseQuery+` ORDER BY r.tanggal DESC`)
+	} else {
+		rows, err = db.Query(ctx, baseQuery+`
+			WHERE r.division_id IS NULL OR r.division_id = $1
+			ORDER BY r.tanggal DESC
+		`, ud.DivisionID)
+	}
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	defer rows.Close()
+
+	list := []NotulensiListItem{}
+	for rows.Next() {
+		var it NotulensiListItem
+		var divID sql.NullInt32
+		var retFinalisasi sql.NullString
+		var attachStr string
+		if err := rows.Scan(
+			&it.NotulensiID, &it.RapatID, &it.JudulRapat, &it.TanggalRapat, &it.LokasiRapat,
+			&it.StatusRapat, &divID, &it.DibuatOleh, &it.Isi, &attachStr, &it.Status,
+			&retFinalisasi, &it.UpdatedAt,
+		); err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+		if divID.Valid {
+			v := int(divID.Int32)
+			it.DivisionID = &v
+		}
+		if retFinalisasi.Valid {
+			it.DifinalisasiOleh = &retFinalisasi.String
+		}
+		it.Attachments = []NotulensiAttachment{}
+		_ = json.Unmarshal([]byte(attachStr), &it.Attachments)
+		list = append(list, it)
+	}
+	return &ListNotulensiResponse{Notulensi: list}, nil
 }
 
 // ============================================================
@@ -719,11 +895,6 @@ type RapatMessageResponse struct {
 
 //encore:api auth path=/rapat/:id/presensi method=POST
 func RecordAttendance(ctx context.Context, id int, params *RecordAttendanceParams) (*RapatMessageResponse, error) {
-	ud := auth.Data().(*user.UserData)
-	if ud.GroupName != "Sekretaris" && ud.GroupName != "Trimitra" && ud.GroupName != "Pembina" {
-		return nil, &errs.Error{Code: errs.PermissionDenied, Message: "hanya Sekretaris, Trimitra atau Pembina"}
-	}
-
 	for _, entry := range params.Entries {
 		status := "Alpa"
 		switch entry.Status {
@@ -833,6 +1004,114 @@ func ListPresensiMenunggu(ctx context.Context) (*ListPresensiResponse, error) {
 		list = append(list, *p)
 	}
 	return &ListPresensiResponse{Presensi: list}, nil
+}
+
+// ============================================================
+// PRESENSI — Riwayat absensi per rapat
+// ============================================================
+
+type RiwayatPresensiItem struct {
+	RapatID        int               `json:"rapat_id"`
+	Judul          string            `json:"judul"`
+	Tanggal        time.Time         `json:"tanggal"`
+	Lokasi         string            `json:"lokasi"`
+	StatusRapat    string            `json:"status_rapat"`
+	TotalHadir     int               `json:"total_hadir"`
+	TotalIzin      int               `json:"total_izin"`
+	TotalSakit     int               `json:"total_sakit"`
+	TotalAlpa      int               `json:"total_alpa"`
+	TotalPeserta   int               `json:"total_peserta"`
+	Details        []RiwayatDetailItem `json:"details"`
+}
+
+type RiwayatDetailItem struct {
+	NIS        string `json:"nis"`
+	Nama       string `json:"nama"`
+	Tipe       string `json:"tipe"`
+	Keterangan string `json:"keterangan"`
+}
+
+type ListRiwayatResponse struct {
+	Riwayat []RiwayatPresensiItem `json:"riwayat"`
+}
+
+// RiwayatPresensi — daftar riwayat kehadiran seluruh rapat yang terlihat user
+//encore:api auth path=/presensi/riwayat method=GET
+func RiwayatPresensi(ctx context.Context) (*ListRiwayatResponse, error) {
+	ud := auth.Data().(*user.UserData)
+
+	baseQuery := `
+		SELECT r.rapat_id, r.judul, r.tanggal, r.lokasi, r.status
+		FROM rapat r
+	`
+	var rows *sqldb.Rows
+	var err error
+	if ud.HasScopeAll() {
+		rows, err = db.Query(ctx, baseQuery+` ORDER BY r.tanggal DESC`)
+	} else if ud.DivisionID != nil {
+		rows, err = db.Query(ctx, baseQuery+`
+			WHERE r.division_id IS NULL OR r.division_id = $1
+			ORDER BY r.tanggal DESC
+		`, *ud.DivisionID)
+	} else {
+		rows, err = db.Query(ctx, baseQuery+`
+			WHERE r.division_id IS NULL
+			ORDER BY r.tanggal DESC
+		`)
+	}
+	if err != nil {
+		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+	}
+	defer rows.Close()
+
+	var riwayatList []RiwayatPresensiItem
+	for rows.Next() {
+		var item RiwayatPresensiItem
+		if err := rows.Scan(&item.RapatID, &item.Judul, &item.Tanggal, &item.Lokasi, &item.StatusRapat); err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+
+		presensiRows, err := db.Query(ctx, `
+			SELECT p.nis, COALESCE(u.nama, p.nis), p.tipe, COALESCE(p.keterangan, '')
+			FROM presensi p
+			LEFT JOIN users u ON u.nis = p.nis
+			WHERE p.acara_type = 'Rapat' AND p.acara_id = $1
+			ORDER BY u.nama ASC
+		`, item.RapatID)
+		if err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+
+		for presensiRows.Next() {
+			var d RiwayatDetailItem
+			if err := presensiRows.Scan(&d.NIS, &d.Nama, &d.Tipe, &d.Keterangan); err != nil {
+				presensiRows.Close()
+				return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+			}
+			switch d.Tipe {
+			case "Hadir":
+				item.TotalHadir++
+			case "Izin":
+				item.TotalIzin++
+			case "Sakit":
+				item.TotalSakit++
+			default:
+				item.TotalAlpa++
+			}
+			item.TotalPeserta++
+			item.Details = append(item.Details, d)
+		}
+		presensiRows.Close()
+
+		if item.Details == nil {
+			item.Details = []RiwayatDetailItem{}
+		}
+		riwayatList = append(riwayatList, item)
+	}
+	if riwayatList == nil {
+		riwayatList = []RiwayatPresensiItem{}
+	}
+	return &ListRiwayatResponse{Riwayat: riwayatList}, nil
 }
 
 // ============================================================

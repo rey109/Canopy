@@ -60,10 +60,10 @@ func Create(ctx context.Context, params *CreateHandoverParams) (*HandoverDetail,
 	nis, _ := auth.UserID()
 	ud := auth.Data().(*user.UserData)
 
-	if ud.GroupName != "Trimitra" && ud.GroupName != "Pembina" {
+	if ud.GroupName != "Trimitra" {
 		return nil, &errs.Error{
 			Code:    errs.PermissionDenied,
-			Message: "hanya Trimitra atau Pembina yang dapat membuat catatan serah terima",
+			Message: "hanya Trimitra yang dapat mengelola proses serah terima",
 		}
 	}
 

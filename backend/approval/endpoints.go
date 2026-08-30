@@ -266,19 +266,45 @@ type ListPendingResponse struct {
 }
 
 // ListPendingPersetujuan — daftar persetujuan yang menunggu aksi user ini
+// Pembina melihat semua dokumen yang butuh approval Pembina tanpa menunggu urutan selesai sebelumnya
 //encore:api auth path=/approval/pending method=GET
 func ListPendingPersetujuan(ctx context.Context) (*ListPendingResponse, error) {
 	ud := auth.Data().(*user.UserData)
+
+	// Pembina OSIS: tampilkan semua antrean Pembina tanpa filter urutan MIN — otomatis masuk saat dokumen dibuat
+	if ud.GroupName == "Pembina" {
+		rows, err := db.Query(ctx, `
+			SELECT p.persetujuan_id, p.dokumen_id, p.urutan, p.approver_group_name,
+			       p.disetujui_oleh, p.keputusan, p.catatan, p.waktu
+			FROM persetujuan p
+			WHERE p.approver_group_name = $1
+			  AND p.keputusan IN ('Menunggu', 'Pending')
+			ORDER BY p.persetujuan_id ASC
+		`, ud.GroupName)
+		if err != nil {
+			return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+		}
+		defer rows.Close()
+		var list []PersetujuanDetail
+		for rows.Next() {
+			p, err := scanPersetujuan(rows)
+			if err != nil {
+				return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
+			}
+			list = append(list, *p)
+		}
+		return &ListPendingResponse{Persetujuan: list}, nil
+	}
 
 	rows, err := db.Query(ctx, `
 		SELECT p.persetujuan_id, p.dokumen_id, p.urutan, p.approver_group_name,
 		       p.disetujui_oleh, p.keputusan, p.catatan, p.waktu
 		FROM persetujuan p
-		WHERE p.keputusan = 'Menunggu'
+		WHERE p.keputusan IN ('Menunggu', 'Pending')
 		  AND p.approver_group_name = $1
 		  AND p.urutan = (
 		      SELECT MIN(p2.urutan) FROM persetujuan p2
-		      WHERE p2.dokumen_id = p.dokumen_id AND p2.keputusan = 'Menunggu'
+		      WHERE p2.dokumen_id = p.dokumen_id AND p2.keputusan IN ('Menunggu', 'Pending')
 		  )
 		ORDER BY p.persetujuan_id ASC
 	`, ud.GroupName)
@@ -299,7 +325,7 @@ func ListPendingPersetujuan(ctx context.Context) (*ListPendingResponse, error) {
 }
 
 type AksiPersetujuanParams struct {
-	Keputusan string  `json:"keputusan"` // 'Disetujui', 'Ditolak'
+	Keputusan string  `json:"keputusan"` // 'Disetujui', 'Ditolak', 'Pending'
 	Catatan   *string `json:"catatan"`
 }
 
@@ -309,8 +335,8 @@ func AksiPersetujuan(ctx context.Context, id int, params *AksiPersetujuanParams)
 	nis, _ := auth.UserID()
 	ud := auth.Data().(*user.UserData)
 
-	if params.Keputusan != "Disetujui" && params.Keputusan != "Ditolak" {
-		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "keputusan harus 'Disetujui' atau 'Ditolak'"}
+	if params.Keputusan != "Disetujui" && params.Keputusan != "Ditolak" && params.Keputusan != "Pending" {
+		return nil, &errs.Error{Code: errs.InvalidArgument, Message: "keputusan harus 'Disetujui', 'Ditolak', atau 'Pending'"}
 	}
 
 	var p PersetujuanDetail
@@ -331,7 +357,7 @@ func AksiPersetujuan(ctx context.Context, id int, params *AksiPersetujuanParams)
 		return nil, &errs.Error{Code: errs.Internal, Message: err.Error()}
 	}
 
-	if p.Keputusan != "Menunggu" {
+	if p.Keputusan != "Menunggu" && p.Keputusan != "Pending" {
 		return nil, &errs.Error{Code: errs.FailedPrecondition, Message: "persetujuan ini sudah diputuskan"}
 	}
 	if p.ApproverGroupName != ud.GroupName {
@@ -414,6 +440,15 @@ func updateDokumenStatus(ctx context.Context, dokumenID int) error {
 		if k == "Ditolak" {
 			newStatus = "Perlu Revisi"
 			break
+		}
+	}
+	// Jika ada Pending dan tidak ada Ditolak, status dokemen jadi Pending agar terlihat oleh pengaju
+	if newStatus == "Menunggu Approval Berjenjang" {
+		for _, k := range keputusanList {
+			if k == "Pending" {
+				newStatus = "Pending"
+				break
+			}
 		}
 	}
 	if newStatus == "Menunggu Approval Berjenjang" && len(keputusanList) > 0 {

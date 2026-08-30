@@ -3,9 +3,12 @@
 import { useEffect, useState } from "react";
 import { api, type AssetDetail } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { canManageSecretariat, canMutate } from "@/lib/role-access";
 
 export default function AssetsPage() {
   const { user } = useAuth();
+  const canBook = canMutate(user);
+  const canApprove = canManageSecretariat(user);
   const [assets, setAssets] = useState<AssetDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -90,7 +93,8 @@ export default function AssetsPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 stagger-children">
           {assets.map((a) => (
-            <div key={a.asset_id} className="glass-card p-5 flex flex-col justify-between hover:translate-y-[-1px] transition-all">
+             <div key={a.asset_id} className="glass-card p-5 flex flex-col justify-between hover:translate-y-[-1px] transition-all">
+               {canApprove && <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-blue-300">Mode sekretariat: antrian persetujuan aktif</p>}
               <div>
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="font-semibold text-lg">{a.nama}</h3>
@@ -105,7 +109,7 @@ export default function AssetsPage() {
                 <button
                   onClick={() => handleOpenBooking(a)}
                   className="btn-primary text-xs py-1.5 px-3"
-                  disabled={a.status !== "Tersedia" || user?.group_name === "Staf"}
+                   disabled={a.status !== "Tersedia" || !canBook}
                 >
                   Booking Aset
                 </button>

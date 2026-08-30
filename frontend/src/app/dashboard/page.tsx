@@ -6,6 +6,8 @@ import { createPortal } from "react-dom";
 import { api, type TransaksiDetail, type RapatDetail } from "@/lib/api";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import RoleContextCard from "@/components/role-context-card";
+import { getRoleGroup } from "@/lib/role-access";
 
 interface Stats {
   prokerCount: number;
@@ -57,6 +59,7 @@ export default function DashboardPage() {
   const [pendingList, setPendingList] = useState<PendingApproval[]>([]);
   const [meetingList, setMeetingList] = useState<RapatDetail[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pembinaAttendance, setPembinaAttendance] = useState<{ totalAnggota: number; totalRapat: number; totalPresensi: number; hadir: number } | null>(null);
 
   // Approval modal states
   const [actioningId, setActioningId] = useState<number | null>(null);
@@ -96,15 +99,20 @@ export default function DashboardPage() {
     }, 1200);
   };
 
-  // Load Agendas from localStorage
-  const loadAgendas = () => {
+  const loadAgendas = async () => {
     try {
-      const saved = localStorage.getItem("canopy_schedule_agendas");
-      if (saved !== null) {
-        setAgendas(JSON.parse(saved));
-      } else {
-        setAgendas([]);
-      }
+      const response = await api.listMeetings();
+      setAgendas(response.rapat.map((meeting) => ({
+        id: meeting.rapat_id,
+        title: meeting.judul,
+        startDate: meeting.tanggal.slice(0, 10),
+        startTime: meeting.tanggal.slice(11, 16),
+        endTime: meeting.tanggal.slice(11, 16),
+        location: meeting.lokasi,
+        isOnline: false,
+        description: meeting.agenda,
+        createdBy: meeting.dibuat_oleh,
+      })));
     } catch {
       setAgendas([]);
     }
@@ -134,22 +142,7 @@ export default function DashboardPage() {
         setMeetingList(meetings.value.rapat || []);
       }
 
-      // Calculate REAL proker count from localStorage (defaults strictly to 0 if empty)
-      const localProkersCount = (() => {
-        try {
-          const saved = localStorage.getItem("canopy_proker_data");
-          if (saved !== null) {
-            const parsed = JSON.parse(saved);
-            return Array.isArray(parsed) ? parsed.length : 0;
-          }
-          return 0;
-        } catch {
-          return 0;
-        }
-      })();
-
-      const apiProkerCount = prokers.status === "fulfilled" && Array.isArray(prokers.value.prokers) ? prokers.value.prokers.length : 0;
-      const actualProkerCount = Math.max(apiProkerCount, localProkersCount);
+       const actualProkerCount = prokers.status === "fulfilled" && Array.isArray(prokers.value.prokers) ? prokers.value.prokers.length : 0;
 
       setStats({
         prokerCount: actualProkerCount,
@@ -167,8 +160,49 @@ export default function DashboardPage() {
   useEffect(() => {
     setMounted(true);
     fetchDashboardData();
-    loadAgendas();
+    void loadAgendas();
   }, [user]);
+
+  // Fetch rekap attendance khusus Pembina
+  useEffect(() => {
+    const group = getRoleGroup(user);
+    if (group !== "Pembina") return;
+    const loadPembinaRekap = async () => {
+      try {
+        const [uRes, mRes] = await Promise.allSettled([api.listUsers(), api.listMeetings()]);
+        const totalAnggota = uRes.status === "fulfilled" && Array.isArray((uRes.value as any).users) ? (uRes.value as any).users.length : 0;
+        const totalRapat = mRes.status === "fulfilled" && Array.isArray((mRes.value as any).rapat) ? (mRes.value as any).rapat.length : meetingList.length;
+        // presensi dari localStorage + pending
+        let totalPresensi = 0;
+        let hadir = 0;
+        if (typeof window !== "undefined") {
+          try {
+            const raw = localStorage.getItem("canopy_local_presensi");
+            if (raw) {
+              const arr = JSON.parse(raw) as any[];
+              totalPresensi = arr.length;
+              hadir = arr.filter((p: any) => String(p.tipe).toLowerCase() === "hadir").length;
+            }
+          } catch {}
+        }
+        // try fetch menunggu as additional count if backend available
+        try {
+          const w = await api.listPresensiMenunggu();
+          if (w?.presensi) {
+            // merge if not already counted (approx)
+            if (totalPresensi === 0) {
+              totalPresensi = w.presensi.length;
+              hadir = w.presensi.filter((p: any) => String(p.tipe).toLowerCase() === "hadir").length;
+            }
+          }
+        } catch {}
+        setPembinaAttendance({ totalAnggota, totalRapat, totalPresensi, hadir });
+      } catch {
+        // silent
+      }
+    };
+    void loadPembinaRekap();
+  }, [user, meetingList.length]);
 
   const handleApprovalAction = async (
     id: number,
@@ -204,9 +238,7 @@ export default function DashboardPage() {
     if (!agendaToDelete) return;
     const updated = agendas.filter((a) => a.id !== agendaToDelete.id);
     setAgendas(updated);
-    try {
-      localStorage.setItem("canopy_schedule_agendas", JSON.stringify(updated));
-    } catch {}
+    void api.deleteMeeting(Number(agendaToDelete.id)).catch(() => {});
 
     setAgendaToDelete(null);
     showSwalToast("Berhasil Dihapus!", "Agenda telah berhasil dihapus.", "delete");
@@ -221,10 +253,26 @@ export default function DashboardPage() {
   };
 
   const selectedAgendas = agendas.filter((a) => a.startDate === currentSelectedDateStr);
+  const roleGroup = getRoleGroup(user);
+  const showFinanceCard = roleGroup === "Bendahara" || roleGroup === "Trimitra";
+  const showApprovalCard = roleGroup === "Sekretaris" || roleGroup === "Bendahara" || roleGroup === "Trimitra" || roleGroup === "Pembina";
+  const roleSummary = roleGroup === "Staf"
+    ? "Tugas personal, jadwal rapat, dan pengumuman divisi."
+    : roleGroup === "Kepala Divisi"
+      ? "Progres divisi, task anggota, dan kehadiran Sekbid."
+      : roleGroup === "Sekretaris"
+        ? "Dokumen, notulensi, presensi, dan aset sesuai scope."
+        : roleGroup === "Bendahara"
+          ? "Saldo, transaksi, verifikasi nota, dan approval berisiko."
+          : roleGroup === "Pembina"
+            ? "Pemantauan organisasi dan catatan pembinaan."
+            : "Approval pusat, struktur, dan ringkasan seluruh organisasi.";
 
   return (
     <div className="animate-fade-in space-y-6 pb-12 text-slate-100 font-sans">
       
+      <RoleContextCard />
+
       {/* TOP BREADCRUMB & HEADER */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-5">
         <div>
@@ -240,6 +288,11 @@ export default function DashboardPage() {
             Selamat datang kembali, <span className="text-blue-400 font-semibold">{user?.nama || "Pengurus OSIS"}</span> ({user?.role_name || user?.group_name || "Anggota"})
           </p>
         </div>
+      </div>
+
+      <div className="glass-card border border-slate-700/70 p-5">
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Prioritas role hari ini</p>
+        <p className="mt-2 text-sm text-slate-200">{roleSummary}</p>
       </div>
 
       {/* EXECUTIVE SUMMARY GRID (4 KPI CARDS ROW) */}
@@ -269,12 +322,16 @@ export default function DashboardPage() {
             <div>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-extrabold text-white">{stats.prokerCount}</span>
+                <span className="text-xs font-semibold text-slate-400">Active</span>
               </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                {stats.prokerCount > 0 ? `${stats.prokerCount} Program Kerja Tersimpan` : "Belum Ada Program Kerja"}
+              </p>
             </div>
           </Link>
 
           {/* Stat Card 2: Pending Approval */}
-          <button
+          {showApprovalCard && <button
             onClick={() => {
               const el = document.getElementById("approval-section");
               if (el) el.scrollIntoView({ behavior: "smooth" });
@@ -295,13 +352,15 @@ export default function DashboardPage() {
             <div>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-extrabold text-white">{pendingList.length}</span>
+                <span className="text-xs font-semibold text-rose-400">Urgent</span>
               </div>
+              <p className="text-[11px] text-slate-400 mt-1">Proposals &amp; Letters</p>
             </div>
-          </button>
+          </button>}
 
-          {/* Stat Card 3: Saldo Kas (Rp 0) */}
-          <Link
-            href="/dashboard/finance"
+           {/* Stat Card 3: Saldo Kas (Rp 0) */}
+           {showFinanceCard ? <Link
+             href="/dashboard/finance"
             className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-emerald-500/60 rounded-2xl p-5 shadow-lg hover:shadow-emerald-500/5 transition-all group flex flex-col justify-between space-y-4"
           >
             <div className="flex items-center justify-between">
@@ -319,10 +378,56 @@ export default function DashboardPage() {
               <div className="flex items-baseline gap-2">
                 <span className="text-xl font-extrabold text-white">{formatCurrency(0)}</span>
               </div>
+              <p className="text-[11px] text-slate-400 mt-1">Belum Ada Kas Masuk</p>
             </div>
-          </Link>
+           </Link> : roleGroup === "Pembina" ? (
+              <Link
+                href="/dashboard/attendance"
+                className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-emerald-500/60 rounded-2xl p-5 shadow-lg hover:shadow-emerald-500/5 transition-all group flex flex-col justify-between space-y-4"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold text-xs">
+                      📊
+                    </div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                      REKAP KEHADIRAN
+                    </span>
+                  </div>
+                  <span className="text-slate-500 group-hover:text-emerald-400 transition-colors text-xs font-bold">→</span>
+                </div>
+                <div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-extrabold text-white">{pembinaAttendance ? `${pembinaAttendance.hadir}/${pembinaAttendance.totalPresensi || pembinaAttendance.totalAnggota || 0}` : "—"}</span>
+                    <span className="text-xs font-semibold text-emerald-400">Hadir</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    {pembinaAttendance
+                      ? `${pembinaAttendance.totalAnggota} anggota • ${pembinaAttendance.totalRapat} rapat • ${pembinaAttendance.totalPresensi} presensi`
+                      : "Rekap absensi seluruh anggota/organisasi"}
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-1">Klik untuk lihat detail rekap</p>
+                </div>
+              </Link>
+            ) : (
+              <Link href="/dashboard/attendance" className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-emerald-500/60 rounded-2xl p-5 shadow-lg hover:shadow-emerald-500/5 transition-all group flex flex-col justify-between space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center font-bold text-xs">
+                      ✅
+                    </div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-200">KEHADIRAN PRIBADI</span>
+                  </div>
+                  <span className="text-slate-500 group-hover:text-emerald-400 transition-colors text-xs font-bold">→</span>
+                </div>
+                <div>
+                  <p className="text-2xl font-extrabold text-emerald-400">—</p>
+                  <p className="mt-1 text-[11px] text-slate-400">Rekap presensi periode aktif • Klik untuk detail</p>
+                </div>
+              </Link>
+            )}
 
-          {/* Stat Card 4: Total Rapat */}
+           {/* Stat Card 4: Total Rapat */}
           <Link
             href="/dashboard/meetings"
             className="bg-[#1e293b]/90 border border-slate-700/60 hover:border-rose-500/60 rounded-2xl p-5 shadow-lg hover:shadow-rose-500/5 transition-all group flex flex-col justify-between space-y-4"
@@ -341,7 +446,9 @@ export default function DashboardPage() {
             <div>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-extrabold text-white">{stats.meetingCount}</span>
+                <span className="text-xs font-semibold text-slate-400">Upcoming</span>
               </div>
+              <p className="text-[11px] text-slate-400 mt-1">Hari ini - Minggu ini</p>
             </div>
           </Link>
 
@@ -420,7 +527,15 @@ export default function DashboardPage() {
                           </span>
                         </td>
                         <td className="py-3.5 px-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => handleApprovalAction(doc.persetujuan_id, "Pending")}
+                              disabled={actioningId !== null}
+                              className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold text-[11px] py-1.5 px-3 rounded-lg transition-all cursor-pointer"
+                              title="Tunda keputusan"
+                            >
+                              Pending
+                            </button>
                             <button
                               onClick={() => setShowRevisionModal(doc.persetujuan_id)}
                               disabled={actioningId !== null}
@@ -433,7 +548,7 @@ export default function DashboardPage() {
                               disabled={actioningId !== null}
                               className="bg-[#2563eb] hover:bg-blue-600 text-white font-semibold text-[11px] py-1.5 px-3.5 rounded-lg shadow-sm transition-all cursor-pointer"
                             >
-                              Setujui
+                              Approve
                             </button>
                           </div>
                         </td>

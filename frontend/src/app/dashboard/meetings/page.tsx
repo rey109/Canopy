@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, type RapatDetail, type UserDetail, type DivisionDetail, type ProkerDetail, type NotulensiAttachment } from "@/lib/api";
+import { api, fileUrl, type RapatDetail, type UserDetail, type DivisionDetail, type ProkerDetail, type NotulensiAttachment } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
 interface AttendanceEntry {
@@ -301,7 +301,21 @@ export default function MeetingsPage() {
       const aRes = await api.listPresensiRapat(m.rapat_id).catch(() => ({ presensi: [] }));
       const current = aRes.presensi || [];
 
-      const populated = userList.map((u) => {
+      const targetInfo = getMeetingTargetInfo(m);
+      const targetLabel = targetInfo.label;
+
+      let filteredUsers = userList;
+      if (targetLabel === "TRIMITRA") {
+        filteredUsers = userList.filter((u) => u.group_name === "Trimitra");
+      } else if (targetLabel === "BPH") {
+        filteredUsers = userList.filter((u) =>
+          ["Trimitra", "Sekretaris", "Bendahara"].includes(u.group_name)
+        );
+      } else if (targetLabel.startsWith("SEKBID ") && m.division_id) {
+        filteredUsers = userList.filter((u) => u.division_id === m.division_id);
+      }
+
+      const populated = filteredUsers.map((u) => {
         const att = current.find((a) => a.nis === u.nis);
         return {
           user_nis: u.nis,
@@ -321,7 +335,7 @@ export default function MeetingsPage() {
     try {
       const entries = attendanceList.map((a) => ({
         user_nis: a.user_nis,
-        status: a.status === "hadir" ? "hadir" : a.status === "izin" ? "izin" : "alfa",
+        status: a.status,
       }));
       await api.recordAttendance(selectedMeeting.rapat_id, { entries });
       alert("Absensi rapat berhasil disimpan!");
@@ -370,18 +384,44 @@ export default function MeetingsPage() {
     }, 1500);
   };
 
+  // Kompres foto di browser agar upload ringan dan tidak melebihi batas server
+  const compressImageFile = async (file: File): Promise<File> => {
+    if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
+    try {
+      const bitmap = await createImageBitmap(file);
+      const maxDim = 1600;
+      const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+      if (scale === 1 && file.size <= 1.5 * 1024 * 1024) return file;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return file;
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), "image/jpeg", 0.82)
+      );
+      bitmap.close?.();
+      if (!blob || blob.size >= file.size) return file;
+      return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+    } catch {
+      return file;
+    }
+  };
+
   const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!notulensiMeeting || !e.target.files?.length) return;
-    const file = e.target.files[0];
+    const original = e.target.files[0];
+    if (original.size > 10 * 1024 * 1024) {
+      alert("Ukuran file maksimal 10 MB.");
+      e.target.value = "";
+      return;
+    }
     setUploadingFile(true);
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      const att: NotulensiAttachment = { url: dataUrl, name: file.name, type: file.type || "application/octet-stream" };
+      const file = await compressImageFile(original);
+      const uploaded = await api.uploadNotulensiFile(notulensiMeeting.rapat_id, file);
+      const att: NotulensiAttachment = { url: uploaded.url, name: uploaded.name, type: uploaded.type };
       const newAttachments = [...notulensiAttachments, att];
       setNotulensiAttachments(newAttachments);
       await api.upsertNotulensi(notulensiMeeting.rapat_id, notulensiIsi, newAttachments);
@@ -433,6 +473,10 @@ export default function MeetingsPage() {
   };
 
   const isStaf = user?.group_name === "Staf";
+  const isReadOnly = user?.group_name === "Pembina" || isStaf;
+  const canCreateMeeting = !isStaf && user?.group_name !== "Pembina";
+  const canFinalizeNotes = user?.group_name === "Sekretaris" || user?.group_name === "Trimitra";
+  const canManageAttendance = user?.group_name === "Sekretaris" || user?.group_name === "Kepala Divisi";
 
   const filteredMeetings = meetings.filter((m) => {
     if (filterStatus !== "Semua" && m.status !== filterStatus) return false;
@@ -459,7 +503,7 @@ export default function MeetingsPage() {
             Manajemen agenda rapat, jadwal kegiatan, absensi QR, dan notulensi organisasi.
           </p>
         </div>
-        {!isStaf && (
+        {canCreateMeeting && (
           <button onClick={() => setShowModal(true)} className="btn-primary">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" />
@@ -605,12 +649,12 @@ export default function MeetingsPage() {
                         </button>
                       </>
                     )}
-                    <button onClick={() => handleOpenAttendance(m)} className="btn-secondary text-xs py-1.5 px-2.5">
-                      Absensi
-                    </button>
-                    <button onClick={() => handleOpenNotulensi(m)} className="btn-primary text-xs py-1.5 px-2.5">
-                      Notulensi
-                    </button>
+                     {canManageAttendance && <button onClick={() => handleOpenAttendance(m)} className="btn-secondary text-xs py-1.5 px-2.5">
+                       Absensi
+                     </button>}
+                     {(canFinalizeNotes || user?.group_name !== "Staf") && <button onClick={() => handleOpenNotulensi(m)} className="btn-primary text-xs py-1.5 px-2.5">
+                       Notulensi
+                     </button>}
                   </div>
                 </div>
               </div>
@@ -730,14 +774,14 @@ export default function MeetingsPage() {
                     return (
                       <div key={idx} className="flex items-center gap-2 p-2 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)]">
                         {isImage ? (
-                          <img src={att.url} alt={att.name} className="w-10 h-10 object-cover rounded" />
+                          <img src={fileUrl(att.url)} alt={att.name} className="w-10 h-10 object-cover rounded" />
                         ) : (
                           <div className="w-10 h-10 flex items-center justify-center rounded bg-[var(--bg-secondary)] text-lg">
                             📄
                           </div>
                         )}
                         <a
-                          href={att.url}
+                          href={fileUrl(att.url)}
                           download={att.name}
                           target="_blank"
                           rel="noreferrer"
@@ -745,7 +789,7 @@ export default function MeetingsPage() {
                         >
                           {att.name}
                         </a>
-                        {notulensiStatus !== "Final" && !isStaf && (
+                        {notulensiStatus !== "Final" && canFinalizeNotes && (
                           <button
                             onClick={() => handleRemoveAttachment(idx)}
                             className="text-[10px] text-red-400 hover:text-red-300 px-1.5 py-1 rounded border border-red-500/30 hover:bg-red-500/10 transition-all flex-shrink-0"

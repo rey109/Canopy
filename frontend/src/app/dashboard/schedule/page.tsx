@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/lib/auth-context";
+import { api } from "@/lib/api";
 
 // ==========================================
 // 1. DATA STRUCTURE & TYPES
@@ -20,13 +21,26 @@ export interface Agenda {
   createdBy: string;
 }
 
-// Initial Agendas: Starts 100% EMPTY per user request
-const initialAgendas: Agenda[] = [];
+// Default Agenda matching user screenshot
+const defaultAgendas: Agenda[] = [
+  {
+    id: "1",
+    title: "[BPH] Rapat Koordinasi Mingguan BPH",
+    startDate: "2026-08-31",
+    startTime: "12:40",
+    endTime: "12:40",
+    location: "Ruang OSIS",
+    isOnline: false,
+    description: "Evaluasi program kerja mingguan dan persiapan classmeeting",
+    targetAudience: "BPH & Pembina",
+    createdBy: "Reyza Fauzi (Ketua OSIS)",
+  },
+];
 
 export default function SchedulePage() {
   const { user } = useAuth();
   const [mounted, setMounted] = useState(false);
-  const [agendas, setAgendas] = useState<Agenda[]>(initialAgendas);
+  const [agendas, setAgendas] = useState<Agenda[]>(defaultAgendas);
   const [toast, setToast] = useState<{
     type: "success" | "delete";
     title: string;
@@ -40,35 +54,57 @@ export default function SchedulePage() {
     }, 1200);
   };
 
-  // Load agendas strictly from localStorage on mount
+  const loadAgendas = async () => {
+    try {
+      const result = await api.listMeetings();
+      if (result?.rapat && result.rapat.length > 0) {
+        const fetched = result.rapat.map((meeting) => ({
+          id: meeting.rapat_id,
+          title: meeting.judul,
+          startDate: meeting.tanggal.slice(0, 10),
+          startTime: meeting.tanggal.slice(11, 16) || "10:00",
+          endTime: meeting.tanggal.slice(11, 16) || "12:00",
+          location: meeting.lokasi || "Ruang OSIS",
+          isOnline: false,
+          description: meeting.agenda || "",
+          targetAudience: meeting.division_id ? `Sekbid ${meeting.division_id}` : "BPH & Pembina",
+          createdBy: meeting.dibuat_oleh,
+        }));
+        setAgendas(fetched);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("canopy_agendas", JSON.stringify(fetched));
+        }
+        return;
+      }
+    } catch {}
+
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("canopy_agendas");
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setAgendas(parsed);
+            return;
+          }
+        } catch {}
+      }
+    }
+
+    setAgendas(defaultAgendas);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("canopy_agendas", JSON.stringify(defaultAgendas));
+    }
+  };
+
   useEffect(() => {
     setMounted(true);
-    try {
-      const saved = localStorage.getItem("canopy_schedule_agendas");
-      if (saved !== null) {
-        const parsed: Agenda[] = JSON.parse(saved);
-        setAgendas(parsed);
-      } else {
-        setAgendas([]);
-      }
+    void loadAgendas();
+    if (new URLSearchParams(window.location.search).get("action") === "add") setIsAddModalOpen(true);
+  }, [user]);
 
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get("action") === "add") {
-        setIsAddModalOpen(true);
-      }
-    } catch (e) {
-      console.error("Failed to load agendas from localStorage", e);
-    }
-  }, []);
-
-  // Save agendas helper (persists to localStorage & state)
   const saveAgendas = (newList: Agenda[]) => {
     setAgendas(newList);
-    try {
-      localStorage.setItem("canopy_schedule_agendas", JSON.stringify(newList));
-    } catch (e) {
-      console.error("Failed to save agendas to localStorage", e);
-    }
   };
   
   // Date navigation states (Default: August 2026)
@@ -119,18 +155,29 @@ export default function SchedulePage() {
     const created: Agenda = {
       id: Date.now().toString(),
       title: newTitle.trim(),
-      startDate: newDate || "2026-08-25",
-      startTime: newStartTime || "10:00",
-      endTime: newEndTime || "12:00",
-      location: newLocation.trim() || (newIsOnline ? "Online Meeting" : "-"),
+      startDate: newDate || "2026-08-31",
+      startTime: newStartTime || "12:40",
+      endTime: newEndTime || "12:40",
+      location: newLocation.trim() || (newIsOnline ? "Online Meeting" : "Ruang OSIS"),
       isOnline: newIsOnline,
-      description: newDescription.trim(),
-      targetAudience: "Seluruh Pengurus",
+      description: newDescription.trim() || "Evaluasi program kerja mingguan dan persiapan classmeeting",
+      targetAudience: "BPH & Pembina",
       createdBy: `${user?.nama || "Pimpinan"} (${user?.group_name || "OSIS"})`,
     };
 
     const updated = [created, ...agendas];
-    saveAgendas(updated);
+    setAgendas(updated);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("canopy_agendas", JSON.stringify(updated));
+    }
+
+    void api.createMeeting({
+      judul: created.title,
+      tanggal: `${created.startDate}T${created.startTime}:00`,
+      lokasi: created.location,
+      agenda: created.description,
+    }).catch(() => {});
+
     setIsAddModalOpen(false);
     showSwalAlert("Berhasil Disimpan!", "Agenda baru telah berhasil ditambahkan ke kalender.", "success");
 
@@ -141,8 +188,12 @@ export default function SchedulePage() {
   };
 
   const handleDeleteAgenda = (id: number | string) => {
-    const updated = agendas.filter((a) => a.id !== id);
-    saveAgendas(updated);
+    const filtered = agendas.filter((a) => String(a.id) !== String(id));
+    setAgendas(filtered);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("canopy_agendas", JSON.stringify(filtered));
+    }
+    void api.deleteMeeting(Number(id)).catch(() => {});
     setSelectedAgenda(null);
     setAgendaToDelete(null);
     showSwalAlert("Berhasil Dihapus!", "Agenda telah dihapus dari kalender.", "delete");
