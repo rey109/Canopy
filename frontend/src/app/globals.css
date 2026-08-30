@@ -18,6 +18,24 @@
   --border-hover: #475569;
   --gradient-start: #3b82f6;
   --gradient-end: #8b5cf6;
+  --font-sans: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --shadow-card: 0 12px 32px rgba(2, 6, 23, 0.22);
+}
+
+@theme inline {
+  --color-canopy-bg: var(--bg-primary);
+  --color-canopy-surface: var(--bg-card);
+  --color-canopy-border: var(--border);
+  --color-canopy-accent: var(--accent);
+  --color-canopy-success: var(--success);
+  --color-canopy-warning: var(--warning);
+  --color-canopy-danger: var(--danger);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
 }
 
 * {
@@ -26,7 +44,7 @@
 }
 
 html {
-  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg-primary);
   color: var(--text-primary);
 }
@@ -35,6 +53,16 @@ body {
   background: var(--bg-primary);
   min-width: 320px;
   -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text-primary);
 }
 
 button, a, input, select, textarea {

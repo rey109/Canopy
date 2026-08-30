@@ -58,6 +58,7 @@ export interface UserDetail {
 export interface LoginResponse {
   token: string;
   user: UserDetail;
+  wajib_ganti_password: boolean;
 }
 
 // ===== INBOUND DATA STRUCTS =====
@@ -361,6 +362,12 @@ export const api = {
     }),
 
   getProfile: () => request<UserDetail>("/user/profile"),
+
+  changePassword: (passwordBaru: string) =>
+    request<{ message: string }>("/user/password", {
+      method: "PUT",
+      body: JSON.stringify({ password_baru: passwordBaru }),
+    }),
 
   listUsers: async (params?: { division_id?: number; group_name?: string; periode_id?: number }) => {
     const q = new URLSearchParams();

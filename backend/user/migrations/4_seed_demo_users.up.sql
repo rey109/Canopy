@@ -63,6 +63,17 @@ BEGIN
         ALTER TABLE users ADD COLUMN foto_url VARCHAR(500) DEFAULT NULL;
     END IF;
 
+    -- Add authentication security fields if not exists
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='wajib_ganti_password') THEN
+        ALTER TABLE users ADD COLUMN wajib_ganti_password BOOLEAN NOT NULL DEFAULT TRUE;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='last_login') THEN
+        ALTER TABLE users ADD COLUMN last_login TIMESTAMP WITH TIME ZONE DEFAULT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='failed_attempts') THEN
+        ALTER TABLE users ADD COLUMN failed_attempts INT NOT NULL DEFAULT 0 CHECK (failed_attempts >= 0);
+    END IF;
+
     -- Drop class if exists
     IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='class') THEN
         ALTER TABLE users DROP COLUMN class;

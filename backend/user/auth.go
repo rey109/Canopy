@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"encore.dev/beta/auth"
 	"encore.dev/beta/errs"
@@ -68,6 +69,9 @@ func AuthHandler(ctx context.Context, token string) (auth.UID, *UserData, error)
 
 	claims := &jwt.RegisteredClaims{}
 	t, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
+		if t.Method != jwt.SigningMethodHS256 {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
 		return jwtSecret, nil
 	})
 	if err != nil || !t.Valid {

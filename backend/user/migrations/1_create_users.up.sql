@@ -7,8 +7,11 @@ CREATE TABLE users (
     jurusan        VARCHAR(100) NOT NULL,
     tahun_masuk    INT NOT NULL,        -- tahun ajaran masuk, basis "1 angkatan"
     foto_url       VARCHAR(500) DEFAULT NULL,
-    password_hash  VARCHAR(255) NOT NULL,
-    created_at     TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    password_hash          VARCHAR(255) NOT NULL,
+    wajib_ganti_password   BOOLEAN NOT NULL DEFAULT TRUE,
+    last_login             TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+    failed_attempts        INT NOT NULL DEFAULT 0 CHECK (failed_attempts >= 0),
+    created_at             TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================================
